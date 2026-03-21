@@ -234,7 +234,7 @@ body {
 .landing-page {
   background: #FFFCF8;
   min-height: 100vh;
-  overflow-x: hidden;
+  /* NOTE: no overflow hidden — it breaks position:sticky */
 }
 
 /* ── Scroll-triggered fade-in ── */

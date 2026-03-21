@@ -4,32 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { ScrollWalkthrough } from "./ScrollWalkthrough";
-import { BranchingLines } from "./BranchingLines";
-import { HeroBranchGraph } from "./HeroBranchGraph";
 
 interface LandingPageProps {
   isLoggedIn: boolean;
-}
-
-/* ─── Intersection-observer fade-in ─────────────────────────────── */
-function useFadeIn<T extends HTMLElement>() {
-  const ref = useRef<T>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          el.classList.add("landing-visible");
-          observer.unobserve(el);
-        }
-      },
-      { threshold: 0.15 }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-  return ref;
 }
 
 /* ─── Logo ──────────────────────────────────────────────────────── */
@@ -45,7 +22,10 @@ function Logo({ variant = "dark" }: { variant?: "dark" | "white" }) {
       />
       <span
         className="text-xl font-semibold tracking-tight"
-        style={{ color: variant === "white" ? "#FFFFFF" : "var(--color-text-primary)" }}
+        style={{
+          color:
+            variant === "white" ? "#FFFFFF" : "var(--color-text-primary)",
+        }}
       >
         twix
       </span>
@@ -69,18 +49,26 @@ function Nav({ isLoggedIn }: { isLoggedIn: boolean }) {
       style={{
         background: scrolled ? "rgba(250,250,248,0.92)" : "transparent",
         backdropFilter: scrolled ? "blur(16px)" : "none",
-        borderBottom: scrolled ? "1px solid var(--color-border)" : "1px solid transparent",
+        borderBottom: scrolled
+          ? "1px solid var(--color-border)"
+          : "1px solid transparent",
       }}
     >
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
         <Logo />
-        <div className="hidden items-center gap-3 md:flex">
+        <div className="flex items-center gap-3">
           {isLoggedIn ? (
-            <Link href="/c" className="landing-btn-primary">Open App</Link>
+            <Link href="/c" className="landing-btn-primary">
+              Open App
+            </Link>
           ) : (
             <>
-              <Link href="/login" className="landing-nav-link">Sign in</Link>
-              <Link href="/register" className="landing-btn-primary">Get Started</Link>
+              <Link href="/login" className="landing-nav-link hidden sm:block">
+                Sign in
+              </Link>
+              <Link href="/register" className="landing-btn-primary">
+                Get Started
+              </Link>
             </>
           )}
         </div>
@@ -89,34 +77,198 @@ function Nav({ isLoggedIn }: { isLoggedIn: boolean }) {
   );
 }
 
-/* ─── Hero ──────────────────────────────────────────────────────── */
-function Hero() {
+/* ═══════════════════════════════════════════════════════════════════
+   SECTION 1: Scroll-Driven Branching Headline
+   ═══════════════════════════════════════════════════════════════════
+   600vh tall container. Content is sticky-centered in the viewport.
+   As the user scrolls, words appear one by one along a branching path:
+
+      Your ── thoughts ── branch.
+                  ●
+                  │
+         Your ── AI ── should ── too.
+
+   Then subtitle + scroll hint appear.
+   ═══════════════════════════════════════════════════════════════════ */
+
+const LINE1 = ["Your", "thoughts", "branch."];
+const LINE2 = ["Your", "AI", "should", "too."];
+const TOTAL_STEPS = LINE1.length + 1 + LINE2.length + 2; // 10
+
+function HeroSection() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setProgress(1);
+      return;
+    }
+    const onScroll = () => {
+      const el = containerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const scrollable = el.offsetHeight - window.innerHeight;
+      if (scrollable <= 0) return;
+      setProgress(Math.max(0, Math.min(1, -rect.top / scrollable)));
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  const step = progress * TOTAL_STEPS;
+  // First word visible immediately (no scroll needed to see something)
+  const line1Show = LINE1.map((_, i) => i === 0 || step >= i + 1);
+  const forkShow = step >= LINE1.length + 1;
+  const forkGrow = Math.min(1, Math.max(0, (step - LINE1.length) / 1));
+  const line2Show = LINE2.map((_, i) => step >= LINE1.length + 1 + i + 1);
+  const subtitleShow = step >= TOTAL_STEPS - 1;
+  const hintShow = step >= TOTAL_STEPS;
+
   return (
-    <section className="relative overflow-hidden flex items-center justify-center" style={{ minHeight: "100vh" }}>
-      <HeroBranchGraph />
-      <div className="landing-hero-glow" />
-      <div className="relative z-10 mx-auto max-w-6xl px-6">
-        <div className="mx-auto max-w-3xl text-center">
-          <h1
-            className="text-4xl font-bold leading-[1.1] tracking-tight sm:text-5xl md:text-6xl"
-            style={{ color: "var(--color-text-primary)" }}
+    <div ref={containerRef} style={{ height: "600vh" }}>
+      <div
+        className="sticky top-0 flex items-center justify-center"
+        style={{ height: "100vh" }}
+      >
+        <div className="flex flex-col items-center px-6">
+          {/* Line 1 */}
+          <div className="flex items-center justify-center flex-wrap">
+            {LINE1.map((word, i) => (
+              <span key={i} className="flex items-center">
+                {i > 0 && (
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 36,
+                      height: 2.5,
+                      borderRadius: 2,
+                      margin: "0 8px",
+                      background: line1Show[i]
+                        ? "rgba(217,119,87,0.3)"
+                        : "transparent",
+                      transition: "background 0.4s ease",
+                    }}
+                  />
+                )}
+                <span
+                  className="text-5xl font-bold tracking-tight sm:text-6xl md:text-7xl"
+                  style={{
+                    color: "var(--color-text-primary)",
+                    opacity: line1Show[i] ? 1 : 0,
+                    transform: line1Show[i]
+                      ? "translateY(0)"
+                      : "translateY(16px)",
+                    transition: "opacity 0.5s ease, transform 0.5s ease",
+                    display: "inline-block",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {word}
+                </span>
+              </span>
+            ))}
+          </div>
+
+          {/* Fork node + line */}
+          <div
+            className="flex flex-col items-center"
+            style={{
+              opacity: forkShow ? 1 : 0,
+              transition: "opacity 0.4s ease",
+            }}
           >
-            Your thoughts branch.
-            <br />
-            <span style={{ color: "var(--color-accent)" }}>Your AI should too.</span>
-          </h1>
+            <div
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: "50%",
+                background: "rgba(217,119,87,0.45)",
+                marginTop: 20,
+                boxShadow: "0 0 20px rgba(217,119,87,0.3)",
+              }}
+            />
+            <div
+              style={{
+                width: 2.5,
+                height: 48,
+                borderRadius: 2,
+                background: "rgba(217,119,87,0.3)",
+                transformOrigin: "top",
+                transform: `scaleY(${forkGrow})`,
+              }}
+            />
+          </div>
+
+          {/* Line 2 */}
+          <div
+            className="flex items-center justify-center flex-wrap"
+            style={{ marginTop: 10 }}
+          >
+            {LINE2.map((word, i) => (
+              <span key={i} className="flex items-center">
+                {i > 0 && (
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 28,
+                      height: 2.5,
+                      borderRadius: 2,
+                      margin: "0 8px",
+                      background: line2Show[i]
+                        ? "rgba(217,119,87,0.3)"
+                        : "transparent",
+                      transition: "background 0.4s ease",
+                    }}
+                  />
+                )}
+                <span
+                  className="text-5xl font-bold tracking-tight sm:text-6xl md:text-7xl"
+                  style={{
+                    color: "var(--color-accent)",
+                    opacity: line2Show[i] ? 1 : 0,
+                    transform: line2Show[i]
+                      ? "translateY(0)"
+                      : "translateY(16px)",
+                    transition: "opacity 0.5s ease, transform 0.5s ease",
+                    display: "inline-block",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {word}
+                </span>
+              </span>
+            ))}
+          </div>
+
+          {/* Subtitle */}
           <p
-            className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed md:text-xl"
-            style={{ color: "var(--color-text-secondary)" }}
+            className="mt-10 max-w-2xl text-lg leading-relaxed md:text-xl text-center"
+            style={{
+              color: "var(--color-text-secondary)",
+              opacity: subtitleShow ? 1 : 0,
+              transform: subtitleShow ? "translateY(0)" : "translateY(10px)",
+              transition: "opacity 0.5s ease, transform 0.5s ease",
+            }}
           >
             Explore any tangent without losing context. Branch, merge, and
             build — all in one conversation.
           </p>
 
           {/* Scroll hint */}
-          <div className="mt-10 flex flex-col items-center gap-2">
-            <p className="text-xs font-medium" style={{ color: "var(--color-text-muted)" }}>
-              Scroll to see it in action
+          <div
+            className="mt-8 flex flex-col items-center gap-2"
+            style={{
+              opacity: hintShow ? 1 : 0,
+              transition: "opacity 0.5s ease",
+            }}
+          >
+            <p
+              className="text-xs font-medium"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Keep scrolling
             </p>
             <svg
               className="h-5 w-5 scroll-hint"
@@ -125,21 +277,61 @@ function Hero() {
               viewBox="0 0 24 24"
               stroke="currentColor"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 14l-7 7m0 0l-7-7m7 7V3"
+              />
             </svg>
           </div>
         </div>
       </div>
-    </section>
+    </div>
   );
 }
 
-/* ─── Brief Features ────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════
+   SECTION 3: Brief Features
+   ═══════════════════════════════════════════════════════════════════ */
+
+function useFadeIn<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          el.classList.add("landing-visible");
+          observer.unobserve(el);
+        }
+      },
+      { threshold: 0.15 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return ref;
+}
+
 const features = [
-  { name: "Tangent Threads", desc: "Highlight text → branch → explore → merge back" },
-  { name: "Cloud Sandbox", desc: "Clone repos, run code, preview live — all in chat" },
-  { name: "Web Intelligence", desc: "Real-time search with inline citations" },
-  { name: "Infinite Depth", desc: "Tangents within tangents within tangents" },
+  {
+    name: "Tangent Threads",
+    desc: "Highlight text → branch → explore → merge back",
+  },
+  {
+    name: "Cloud Sandbox",
+    desc: "Clone repos, run code, preview live — all in chat",
+  },
+  {
+    name: "Web Intelligence",
+    desc: "Real-time search with inline citations",
+  },
+  {
+    name: "Infinite Depth",
+    desc: "Tangents within tangents within tangents",
+  },
 ];
 
 function BriefFeatures() {
@@ -188,10 +380,12 @@ function BriefFeatures() {
   );
 }
 
-/* ─── CTA ───────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════
+   SECTION 4: CTA
+   ═══════════════════════════════════════════════════════════════════ */
+
 function CTA({ isLoggedIn }: { isLoggedIn: boolean }) {
   const ref = useFadeIn<HTMLElement>();
-
   return (
     <section ref={ref} className="landing-fade-in py-24 md:py-32">
       <div className="mx-auto max-w-6xl px-6">
@@ -215,8 +409,18 @@ function CTA({ isLoggedIn }: { isLoggedIn: boolean }) {
               className="landing-btn-primary landing-btn-lg"
             >
               {isLoggedIn ? "Open App" : "Get Started — Free"}
-              <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              <svg
+                className="ml-2 h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M13 7l5 5m0 0l-5 5m5-5H6"
+                />
               </svg>
             </Link>
           </div>
@@ -226,7 +430,10 @@ function CTA({ isLoggedIn }: { isLoggedIn: boolean }) {
   );
 }
 
-/* ─── Footer ────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════
+   SECTION 5: Footer
+   ═══════════════════════════════════════════════════════════════════ */
+
 function Footer() {
   return (
     <footer style={{ background: "#1A1614" }}>
@@ -234,8 +441,12 @@ function Footer() {
         <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-between">
           <Logo variant="white" />
           <div className="flex items-center gap-6">
-            <Link href="/login" className="landing-footer-link">Sign In</Link>
-            <Link href="/register" className="landing-footer-link">Create Account</Link>
+            <Link href="/login" className="landing-footer-link">
+              Sign In
+            </Link>
+            <Link href="/register" className="landing-footer-link">
+              Create Account
+            </Link>
           </div>
         </div>
         <div
@@ -251,13 +462,15 @@ function Footer() {
   );
 }
 
-/* ─── Main page ─────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════
+   Main Page
+   ═══════════════════════════════════════════════════════════════════ */
+
 export function LandingPage({ isLoggedIn }: LandingPageProps) {
   return (
-    <div className="landing-page relative">
-      <BranchingLines />
+    <div className="landing-page">
       <Nav isLoggedIn={isLoggedIn} />
-      <Hero />
+      <HeroSection />
       <ScrollWalkthrough />
       <BriefFeatures />
       <CTA isLoggedIn={isLoggedIn} />
