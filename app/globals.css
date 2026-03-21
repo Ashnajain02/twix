@@ -426,3 +426,74 @@ body {
     scroll-behavior: smooth;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Landing Page v4 — Scroll Walkthrough
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Walkthrough container ── */
+.walkthrough-container {
+  position: relative;
+}
+
+/* ── Chat window elements ── */
+.wt-msg-enter {
+  transition: opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+              transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.wt-highlight {
+  border-radius: 2px;
+  padding: 0 2px;
+  transition: background 0.5s ease, border-color 0.5s ease;
+  border-bottom: 1.5px solid transparent;
+}
+.wt-highlight-active {
+  background: var(--color-accent-subtle);
+  border-bottom-color: var(--color-accent);
+}
+.wt-popup {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.wt-tangent-panel {
+  overflow: hidden;
+  transition: max-width 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 0.4s ease;
+}
+.wt-merge-indicator {
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+/* ── Branching lines SVG ── */
+.branching-lines-svg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* ── Brief features ── */
+.feature-line {
+  transition: opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1),
+              transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ── Scroll hint bounce ── */
+@keyframes scroll-hint-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(6px); }
+}
+.scroll-hint {
+  animation: scroll-hint-bounce 2s ease-in-out infinite;
+}
+
+/* ── Reduced Motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .wt-msg-enter { transition: none; }
+  .wt-highlight { transition: none; }
+  .wt-popup { transition: none; }
+  .wt-tangent-panel { transition: none; }
+  .wt-merge-indicator { transition: none; }
+  .feature-line { transition: none; }
+  .scroll-hint { animation: none; }
+  .branching-lines-svg { display: none; }
+}

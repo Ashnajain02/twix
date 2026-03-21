@@ -13,17 +13,19 @@ export async function GET(
 
   const { conversationId } = await params;
 
+  // Fast path: check in-memory sandbox map first — avoids DB roundtrip when no sandbox is active
+  const info = await getSandboxInfo(conversationId);
+  if (!info) {
+    return Response.json({ active: false });
+  }
+
+  // Only verify ownership if a sandbox actually exists
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
   });
 
   if (!conversation || conversation.userId !== session.user.id) {
     return Response.json({ error: "Not found" }, { status: 404 });
-  }
-
-  const info = await getSandboxInfo(conversationId);
-  if (!info) {
-    return Response.json({ active: false });
   }
 
   return Response.json({ active: true, sandboxId: info.sandboxId });

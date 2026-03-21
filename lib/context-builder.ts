@@ -21,6 +21,7 @@ interface ContextMessage {
 export async function buildContextForThread(
   threadId: string
 ): Promise<ContextMessage[]> {
+  // Fetch thread metadata first (lightweight query) to check if we need parent messages
   const thread = await prisma.thread.findUnique({
     where: { id: threadId },
     include: {
@@ -35,7 +36,6 @@ export async function buildContextForThread(
               messages: {
                 orderBy: { createdAt: "asc" },
                 select: { role: true, content: true },
-                // Only load last 8 messages per merged thread to limit context size
                 take: 8,
               },
             },
@@ -52,6 +52,8 @@ export async function buildContextForThread(
 
   // Step 1: Inherit parent context if this is a tangent thread
   if (thread.parentThreadId && thread.parentMessageId) {
+    // NOTE: This query only runs for tangent threads (not main thread),
+    // so the main-thread hot path has zero extra DB calls.
     const parentMessages = await prisma.message.findMany({
       where: { threadId: thread.parentThreadId },
       orderBy: { createdAt: "asc" },

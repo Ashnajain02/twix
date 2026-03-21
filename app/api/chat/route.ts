@@ -18,31 +18,19 @@ import {
 
 export async function POST(req: Request) {
   const requestStart = Date.now();
-  const session = await auth();
+
+  // Step 1: Auth + body parsing in parallel
+  const [session, body] = await Promise.all([auth(), req.json()]);
   if (!session?.user?.id) {
     console.log("[chat] Unauthorized request");
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const { threadId, messages } = await req.json();
-  console.log(`[chat] Request from user=${session.user.id} thread=${threadId} messages=${messages.length}`);
+  const { threadId, messages } = body;
+  const authDone = Date.now();
+  console.log(`[chat] Auth+parse: ${authDone - requestStart}ms | user=${session.user.id} thread=${threadId} messages=${messages.length}`);
 
-  // Verify thread ownership
-  const thread = await prisma.thread.findUnique({
-    where: { id: threadId },
-    include: { conversation: true },
-  });
-
-  if (!thread || thread.conversation.userId !== session.user.id) {
-    console.log(`[chat] Thread not found or unauthorized: ${threadId}`);
-    return new Response("Not found", { status: 404 });
-  }
-
-  // Build the full recursive context for this thread
-  const contextMessages = await buildContextForThread(threadId);
-  console.log(`[chat] Context built: ${contextMessages.length} messages (depth=${thread.depth})`);
-
-  // Extract the latest user message from the client payload
+  // Extract the latest user message from the client payload (no DB needed)
   const latestMessage = messages[messages.length - 1];
   const latestContent =
     latestMessage.parts
@@ -54,10 +42,26 @@ export async function POST(req: Request) {
 
   console.log(`[chat] User message: "${latestContent.slice(0, 100)}${latestContent.length > 100 ? "..." : ""}"`);
 
-  // Persist the user message
-  await prisma.message.create({
-    data: { threadId, role: "USER", content: latestContent },
-  });
+  // Step 2: Thread verification + context building + message persistence in parallel
+  const [thread, contextMessages] = await Promise.all([
+    prisma.thread.findUnique({
+      where: { id: threadId },
+      include: { conversation: true },
+    }),
+    buildContextForThread(threadId),
+    // Fire-and-forget: persist user message without blocking the stream
+    prisma.message.create({
+      data: { threadId, role: "USER", content: latestContent },
+    }),
+  ]);
+
+  if (!thread || thread.conversation.userId !== session.user.id) {
+    console.log(`[chat] Thread not found or unauthorized: ${threadId}`);
+    return new Response("Not found", { status: 404 });
+  }
+
+  const preStreamMs = Date.now() - requestStart;
+  console.log(`[chat] Pre-stream: ${preStreamMs}ms | context: ${contextMessages.length} messages (depth=${thread.depth})`);
 
   // Tavily client — only created if API key is present
   const tavilyApiKey = process.env.TAVILY_API_KEY;
@@ -68,14 +72,14 @@ export async function POST(req: Request) {
 
   const result = streamText({
     model: chatModel,
-    system: getSystemPrompt(),
+    system: getSystemPrompt(hasE2B),
     messages: [...contextMessages, { role: "user", content: latestContent }],
 
     // ── Web search tool ──────────────────────────────────────────────
     tools: {
       webSearch: tool({
         description:
-          "Search the web for real-time information. Use this whenever the user asks about current events, recent news, live data, today's date, weather, prices, sports scores, or anything requiring up-to-date knowledge.",
+          "Search the web. ONLY call this if the answer requires information from after your training cutoff (e.g. today's news, live prices, recent events). NEVER call this for historical facts, science, math, coding, or anything you already know.",
         inputSchema: zodSchema(z.object({
           query: z.string().describe("A clear, concise search query"),
         })),
@@ -90,18 +94,17 @@ export async function POST(req: Request) {
             console.log(`[tool:webSearch] query="${query}"`);
             const searchStart = Date.now();
             const response = await tavilyClient.search(query, {
-              maxResults: 7,
-              searchDepth: "advanced",
+              maxResults: 5,
+              searchDepth: "basic",
               includeAnswer: true,
-              days: 90,
             });
             console.log(`[tool:webSearch] ${response.results.length} results in ${Date.now() - searchStart}ms`);
             return {
               answer: response.answer ?? null,
-              results: response.results.slice(0, 5).map((r) => ({
+              results: response.results.slice(0, 3).map((r) => ({
                 title: r.title,
                 url: r.url,
-                snippet: r.content?.slice(0, 1000),
+                snippet: r.content?.slice(0, 500),
               })),
             };
           } catch (err) {
@@ -377,8 +380,8 @@ export async function POST(req: Request) {
         : {}),
     },
 
-    // Allow up to 10 tool-call steps for complex dev workflows
-    stopWhen: stepCountIs(25),
+    // Limit tool steps: 5 for sandbox workflows, keeps responses snappy
+    stopWhen: stepCountIs(5),
 
     async onFinish({ text, usage, steps }) {
       const elapsed = Date.now() - requestStart;
@@ -430,5 +433,9 @@ export async function POST(req: Request) {
     },
   });
 
-  return result.toUIMessageStreamResponse();
+  return result.toUIMessageStreamResponse({
+    headers: {
+      "Server-Timing": `prestream;dur=${preStreamMs}`,
+    },
+  });
 }

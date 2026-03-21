@@ -128,6 +128,14 @@ export function ChatPage({
     fetchThreadMergeEvents(mainThreadId, true);
   }, [mainThreadId, fetchThreadMergeEvents]);
 
+  // Fetch merge events for tangent threads — runs after hydration populates openTangents
+  useEffect(() => {
+    for (const tangent of openTangents) {
+      fetchThreadMergeEvents(tangent.threadId, false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openTangents.length, fetchThreadMergeEvents]);
+
   // Handle opening a tangent thread
   const handleOpenTangent = useCallback(
     async (

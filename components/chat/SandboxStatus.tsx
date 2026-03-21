@@ -42,10 +42,16 @@ export function SandboxStatus({ conversationId }: SandboxStatusProps) {
   }, [conversationId]);
 
   useEffect(() => {
+    // Only poll once on mount — if no sandbox is active, don't keep polling
     checkSandbox();
+  }, [checkSandbox]);
+
+  // Start polling only after we discover an active sandbox
+  useEffect(() => {
+    if (!sandboxId) return;
     const interval = setInterval(checkSandbox, 30_000);
     return () => clearInterval(interval);
-  }, [checkSandbox]);
+  }, [sandboxId, checkSandbox]);
 
   if (!sandboxId) return null;
 
