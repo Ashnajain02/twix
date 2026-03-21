@@ -103,21 +103,22 @@ export function ScrollWalkthrough() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  // Phases
-  const showUser = p > 0.04;
-  const showAst = p > 0.12;
-  const astCount = Math.floor(ASSISTANT_WORDS.length * Math.min(1, Math.max(0, (p - 0.12) / 0.28)));
-  const hl = p > 0.42;
-  const popup = p > 0.48 && p < 0.57;
-  const tOpen = p > 0.55 && p < 0.88;
-  const tUser = p > 0.62;
-  const tAst = p > 0.67;
-  const tAstCount = Math.floor(TANGENT_WORDS.length * Math.min(1, Math.max(0, (p - 0.67) / 0.18)));
-  const merged = p > 0.88;
-  const cta = p > 0.94;
+  // Phases — spread out with breathing room before merge
+  const showUser = p > 0.03;
+  const showAst = p > 0.08;
+  const astCount = Math.floor(ASSISTANT_WORDS.length * Math.min(1, Math.max(0, (p - 0.08) / 0.22)));
+  const hl = p > 0.32;
+  const popup = p > 0.37 && p < 0.43;
+  const tOpen = p > 0.43 && p < 0.82;
+  const tUser = p > 0.48;
+  const tAst = p > 0.52;
+  const tAstCount = Math.floor(TANGENT_WORDS.length * Math.min(1, Math.max(0, (p - 0.52) / 0.16)));
+  // Tangent answer fully visible at ~0.68. Merge at 0.82 = 14% gap (~100vh of just reading)
+  const merged = p > 0.82;
+  const cta = p > 0.92;
 
   return (
-    <div ref={scrollRef} style={{ height: "500vh" }}>
+    <div ref={scrollRef} style={{ height: "700vh" }}>
       {/* Fixed full-viewport app frame — z-index above nav (z-50) */}
       <div
         className="fixed inset-0 z-[60] flex flex-col"
