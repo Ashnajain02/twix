@@ -81,10 +81,12 @@ model Thread {
   parentThreadId  String?      @map("parent_thread_id")
   parentMessageId String?      @map("parent_message_id")
   highlightedText String?      @map("highlighted_text") @db.Text
-  status          ThreadStatus @default(ACTIVE)
-  depth           Int          @default(0)
-  createdAt       DateTime     @default(now()) @map("created_at")
-  mergedAt        DateTime?    @map("merged_at")
+  status              ThreadStatus @default(ACTIVE)
+  depth               Int          @default(0)
+  createdAt           DateTime     @default(now()) @map("created_at")
+  mergedAt            DateTime?    @map("merged_at")
+  summary             String?      @db.Text @map("summary")
+  summaryMessageCount Int          @default(0) @map("summary_message_count")
 
   conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   parentThread   Thread?       @relation("ThreadTree", fields: [parentThreadId], references: [id])

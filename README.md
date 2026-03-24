@@ -27,17 +27,94 @@ The database stores conversations as a **tree of threads**. Each conversation ha
 
 This creates a tree structure: Main → Tangent A → Sub-tangent A1, etc.
 
-### Recursive context building
+### Context building & hierarchical compression
 
-When the AI responds in any thread, it needs to "see" the full conversation history — not just the current branch, but everything above it. The **context builder** (`lib/context-builder.ts`) does this recursively:
+When the AI responds in any thread, it needs to "see" the conversation history above it — not just the current branch, but its ancestors too. Naively sending every ancestor message verbatim would cause token usage to explode as users branch deeper.
 
-1. Start at the current thread
-2. If it has a parent, recursively build the parent's context first (up to the message where the branch happened)
-3. Inject a system message like "The user wants to explore: [highlighted text]"
-4. Append this thread's own messages
-5. After each message, check if any merged tangents should be injected at that point
+The **context builder** (`lib/context-builder.ts`) solves this with **hierarchical compression** — the further away an ancestor thread is, the more aggressively it gets compressed:
 
-This means a tangent three levels deep still "knows" the full main conversation plus all the merged side threads above it.
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    WHAT THE AI RECEIVES                         │
+│                                                                 │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │  Grandparent thread (depth 0)          ░░ SUMMARY ONLY   │  │
+│  │  ┌─────────────────────────────────────────────────────┐  │  │
+│  │  │ "The user discussed X, Y, Z. Key conclusions: ..." │  │  │
+│  │  └─────────────────────────────────────────────────────┘  │  │
+│  │  ~ 50-100 tokens (was 2000+)                              │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│                          │                                      │
+│                    ▼ branched on                                 │
+│                  "highlighted text"                              │
+│                          │                                      │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │  Parent thread (depth 1)          ░░ SUMMARY + RECENT    │  │
+│  │  ┌─────────────────────────────────────────────────────┐  │  │
+│  │  │ Summary of older messages (paragraph)               │  │  │
+│  │  ├─────────────────────────────────────────────────────┤  │  │
+│  │  │ Last 10 messages in FULL (up to branch point)       │  │  │
+│  │  └─────────────────────────────────────────────────────┘  │  │
+│  │  ~ 500-1500 tokens (was 5000+)                            │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│                          │                                      │
+│                    ▼ branched on                                 │
+│                  "highlighted text"                              │
+│                          │                                      │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │  Current thread (depth 2)               ░░ FULL DETAIL   │  │
+│  │  ┌─────────────────────────────────────────────────────┐  │  │
+│  │  │ ALL messages in full                                │  │  │
+│  │  │ + merged tangent summaries injected at merge points │  │  │
+│  │  └─────────────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+| Ancestor distance | What's sent to the LLM | Typical tokens |
+|---|---|---|
+| **Current thread** | All messages + merged tangent summaries | Full |
+| **Immediate parent** | Paragraph summary of older messages + last 10 messages verbatim | ~500–1500 |
+| **Grandparent and above** | Paragraph summary only + tangent transition markers | ~50–100 each |
+
+**Eager summarization** — Summaries aren't generated on-the-fly. After every assistant response, a background job checks whether the thread has accumulated 20+ new messages since its last summary. If so, it generates a paragraph summary (via GPT-4.1-nano) and stores it in the database. This means the context builder just reads a pre-computed summary — no extra LLM call at request time.
+
+```
+  User sends message
+         │
+         ▼
+  ┌─────────────┐     ┌──────────────────┐
+  │  Chat API   │────▶│  Context Builder  │──── reads thread.summary from DB
+  │  route.ts   │     │  (hierarchical)   │──── fetches recent messages
+  └──────┬──────┘     └──────────────────┘
+         │
+         ▼
+  Stream AI response
+         │
+         ▼
+  Persist assistant message
+         │
+         ▼
+  ┌──────────────────────┐
+  │  Thread Summarizer   │  (fire-and-forget)
+  │  ┌────────────────┐  │
+  │  │ 20+ new msgs?  │──│── no → skip
+  │  │ since summary  │  │
+  │  └───────┬────────┘  │
+  │          yes          │
+  │          ▼            │
+  │  Generate paragraph   │
+  │  summary via LLM      │
+  │          │            │
+  │          ▼            │
+  │  Store in thread.     │
+  │  summary + update     │
+  │  summaryMessageCount  │
+  └──────────────────────┘
+```
+
+This means a tangent five levels deep sends ~200 tokens of ancestor summaries instead of thousands of verbatim messages — while still giving the AI full context for the active conversation.
 
 ### State management
 

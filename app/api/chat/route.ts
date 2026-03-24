@@ -5,6 +5,7 @@ import { chatModel, getSystemPrompt } from "@/lib/ai";
 import { auth } from "@/lib/auth";
 import { buildContextForThread } from "@/lib/context-builder";
 import { prisma } from "@/lib/prisma";
+import { maybeUpdateThreadSummary } from "@/lib/thread-summarizer";
 import {
   runCommand,
   readSandboxFile,
@@ -408,6 +409,11 @@ export async function POST(req: Request) {
         );
       }
       await Promise.all(writes);
+
+      // Eager summarization: fire-and-forget
+      maybeUpdateThreadSummary(threadId).catch((err) =>
+        console.error(`[chat] Summary generation failed:`, err)
+      );
 
       // Auto-title: fire-and-forget (don't block the response)
       if (thread.depth === 0 && thread.conversation.title === "New Conversation") {
