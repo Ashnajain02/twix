@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { ScrollWalkthrough } from "./ScrollWalkthrough";
 import { BranchingHeadline } from "./BranchingHeadline";
+import { ArchitectureFlow } from "./ArchitectureFlow";
 
 interface LandingPageProps {
   isLoggedIn: boolean;
@@ -106,66 +107,6 @@ function useFadeIn<T extends HTMLElement>() {
   return ref;
 }
 
-const features = [
-  {
-    name: "Tangent Threads",
-    desc: "Highlight text → branch → explore → merge back",
-  },
-  {
-    name: "Web Intelligence",
-    desc: "Real-time search with inline citations",
-  },
-  {
-    name: "Infinite Depth",
-    desc: "Tangents within tangents within tangents",
-  },
-];
-
-function BriefFeatures() {
-  return (
-    <section className="py-20 md:py-28">
-      <div className="mx-auto max-w-2xl px-6">
-        <p
-          className="text-sm font-semibold uppercase tracking-widest text-center mb-10"
-          style={{ color: "var(--color-accent)" }}
-        >
-          Features
-        </p>
-        <div className="space-y-6">
-          {features.map((f, i) => {
-            const ref = useFadeIn<HTMLDivElement>();
-            return (
-              <div
-                key={i}
-                ref={ref}
-                className="landing-fade-in flex items-baseline gap-4"
-              >
-                <div
-                  className="mt-2 h-2 w-2 shrink-0 rounded-full"
-                  style={{ background: "var(--color-accent)" }}
-                />
-                <div>
-                  <span
-                    className="text-base font-semibold"
-                    style={{ color: "var(--color-text-primary)" }}
-                  >
-                    {f.name}
-                  </span>
-                  <span
-                    className="ml-3 text-sm"
-                    style={{ color: "var(--color-text-secondary)" }}
-                  >
-                    {f.desc}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </section>
-  );
-}
 
 /* ═══════════════════════════════════════════════════════════════════
    SECTION 4: CTA
@@ -174,43 +115,82 @@ function BriefFeatures() {
 function CTA({ isLoggedIn }: { isLoggedIn: boolean }) {
   const ref = useFadeIn<HTMLElement>();
   return (
-    <section ref={ref} className="landing-fade-in py-24 md:py-32">
-      <div className="mx-auto max-w-6xl px-6">
-        <div className="landing-cta-card">
-          <h2
-            className="text-3xl font-bold tracking-tight sm:text-4xl"
-            style={{ color: "var(--color-text-primary)" }}
+    <section
+      ref={ref}
+      className="landing-fade-in relative overflow-hidden"
+      style={{ background: "#1A1614" }}
+    >
+      {/* Subtle gradient glow */}
+      <div
+        className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] rounded-full blur-[120px] pointer-events-none"
+        style={{ background: "rgba(217,119,87,0.12)" }}
+      />
+
+      <div className="relative mx-auto max-w-3xl px-6 py-24 md:py-32 text-center">
+        <p
+          className="text-sm font-semibold uppercase tracking-widest mb-4"
+          style={{ color: "rgba(217,119,87,0.8)" }}
+        >
+          Open Source
+        </p>
+        <h2
+          className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl"
+          style={{ color: "#FAFAF8" }}
+        >
+          Your thoughts branch.
+          <br />
+          <span style={{ color: "var(--color-accent)" }}>Your AI should too.</span>
+        </h2>
+        <p
+          className="mx-auto mt-5 max-w-md text-base leading-relaxed"
+          style={{ color: "rgba(255,255,255,0.5)" }}
+        >
+          Branching conversations, semantic retrieval, structured knowledge
+          — built for how you actually think.
+        </p>
+        <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-3">
+          <Link
+            href={isLoggedIn ? "/c" : "/register"}
+            className="landing-btn-primary landing-btn-lg"
           >
-            Ready to think differently?
-          </h2>
-          <p
-            className="mx-auto mt-4 max-w-lg text-lg leading-relaxed"
-            style={{ color: "var(--color-text-secondary)" }}
-          >
-            Join Twix and experience conversations that branch, code that runs,
-            and answers that stay current.
-          </p>
-          <div className="mt-8">
-            <Link
-              href={isLoggedIn ? "/c" : "/register"}
-              className="landing-btn-primary landing-btn-lg"
+            {isLoggedIn ? "Open App" : "Try Twix"}
+            <svg
+              className="ml-2 h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
             >
-              {isLoggedIn ? "Open App" : "Get Started — Free"}
-              <svg
-                className="ml-2 h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M13 7l5 5m0 0l-5 5m5-5H6"
-                />
-              </svg>
-            </Link>
-          </div>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M13 7l5 5m0 0l-5 5m5-5H6"
+              />
+            </svg>
+          </Link>
+          <a
+            href="https://github.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-medium transition-colors"
+            style={{
+              color: "rgba(255,255,255,0.6)",
+              border: "1px solid rgba(255,255,255,0.12)",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = "rgba(255,255,255,0.3)";
+              e.currentTarget.style.color = "rgba(255,255,255,0.9)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)";
+              e.currentTarget.style.color = "rgba(255,255,255,0.6)";
+            }}
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+            </svg>
+            View Source
+          </a>
         </div>
       </div>
     </section>
@@ -259,7 +239,7 @@ export function LandingPage({ isLoggedIn }: LandingPageProps) {
       <Nav isLoggedIn={isLoggedIn} />
       <BranchingHeadline />
       <ScrollWalkthrough />
-      <BriefFeatures />
+      <ArchitectureFlow />
       <CTA isLoggedIn={isLoggedIn} />
       <Footer />
     </div>

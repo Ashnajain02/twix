@@ -34,14 +34,20 @@ export async function POST(req: Request) {
 
   console.log(`[chat] User message: "${latestContent.slice(0, 100)}${latestContent.length > 100 ? "..." : ""}"`);
 
-  // Step 2: Thread verification + context building + message persistence in parallel
-  // Pass latestContent to context builder for semantic retrieval from ancestors
-  const [thread, contextMessages, userMsg] = await Promise.all([
+  // Step 2: Fetch thread (with all data needed for both auth AND context building)
+  //         + persist user message — in parallel. Single thread query, no duplicate.
+  const [thread, userMsg] = await Promise.all([
     prisma.thread.findUnique({
       where: { id: threadId },
-      include: { conversation: true },
+      include: {
+        conversation: true,
+        messages: { orderBy: { createdAt: "asc" } },
+        mergesAsTarget: {
+          include: { sourceThread: true },
+          orderBy: { createdAt: "asc" },
+        },
+      },
     }),
-    buildContextForThread(threadId, latestContent),
     prisma.message.create({
       data: { threadId, role: "USER", content: latestContent },
     }),
@@ -51,6 +57,9 @@ export async function POST(req: Request) {
     console.log(`[chat] Thread not found or unauthorized: ${threadId}`);
     return new Response("Not found", { status: 404 });
   }
+
+  // Build context from already-fetched thread data — zero additional queries for depth 0
+  const contextMessages = await buildContextForThread(thread, latestContent);
 
   // Fire-and-forget: embed the user message
   embedMessage(userMsg.id).catch((err) =>

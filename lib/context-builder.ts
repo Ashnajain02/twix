@@ -31,21 +31,26 @@ const SEMANTIC_RETRIEVAL_LIMIT = 6;
 // Public API
 // ---------------------------------------------------------------------------
 
+/**
+ * Accepts the pre-fetched thread (with messages + merges already loaded)
+ * so the route doesn't need a duplicate query. Zero additional DB calls
+ * for depth 0.
+ */
 export async function buildContextForThread(
-  threadId: string,
+  thread: {
+    id: string;
+    parentThreadId: string | null;
+    parentMessageId: string | null;
+    highlightedText: string | null;
+    messages: Array<{ id: string; role: string; content: string }>;
+    mergesAsTarget: Array<{
+      afterMessageId: string;
+      summary: string | null;
+      sourceThread: { knowledge: unknown; summary: string | null };
+    }>;
+  },
   currentQuery?: string
 ): Promise<ContextMessage[]> {
-  // Fetch current thread with messages and merges
-  const thread = await prisma.thread.findUniqueOrThrow({
-    where: { id: threadId },
-    include: {
-      messages: { orderBy: { createdAt: "asc" } },
-      mergesAsTarget: {
-        include: { sourceThread: true },
-        orderBy: { createdAt: "asc" },
-      },
-    },
-  });
 
   // ── Fast path: main thread (depth 0) — no ancestors, no embedding needed ──
   if (!thread.parentThreadId || !thread.parentMessageId) {

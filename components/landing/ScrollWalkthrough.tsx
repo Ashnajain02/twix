@@ -124,8 +124,9 @@ export function ScrollWalkthrough() {
         className="fixed inset-0 z-[60] flex flex-col"
         style={{
           background: "var(--color-bg-base)",
-          opacity: p > 0 || (scrollRef.current && scrollRef.current.getBoundingClientRect().top <= 0) ? 1 : 0,
-          pointerEvents: "none",
+          opacity: p > 0 && p < 1 ? 1 : 0,
+          pointerEvents: p > 0 && p < 1 ? "none" : "none",
+          visibility: p >= 1 ? "hidden" as const : "visible" as const,
           transition: "opacity 0.3s ease",
         }}
       >
