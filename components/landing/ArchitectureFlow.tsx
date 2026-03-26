@@ -435,169 +435,122 @@ export function ArchitectureFlow() {
   // Each stage gets an equal slice of the scroll range
   const stageSlice = 1 / STAGES.length;
 
+  // Find the active stage
+  const activeIndex = Math.min(
+    STAGES.length - 1,
+    Math.floor(scrollProgress * STAGES.length)
+  );
+  const stageLocalProgress =
+    (scrollProgress - activeIndex * stageSlice) / stageSlice;
+
   return (
     <div ref={containerRef} style={{ height: `${STAGES.length * 100}vh` }}>
       <div className="sticky top-0" style={{ height: "100vh" }}>
-        <div className="h-full flex flex-col justify-center">
-          <div className="mx-auto max-w-5xl w-full px-6">
+        <div className="h-full flex flex-col">
 
-            {/* Section header */}
-            <div className="text-center mb-10 md:mb-14">
-              <p
-                className="text-sm font-semibold uppercase tracking-widest mb-3"
-                style={{ color: "var(--color-accent)" }}
-              >
-                Under the Hood
-              </p>
-              <h2
-                className="text-2xl font-bold tracking-tight sm:text-3xl md:text-4xl"
-                style={{ color: "var(--color-text-primary)" }}
-              >
-                Follow a message through the pipeline
-              </h2>
-              <p
-                className="mt-3 text-sm sm:text-base max-w-lg mx-auto"
-                style={{ color: "var(--color-text-secondary)" }}
-              >
-                From user input to streamed response — every stage optimized
-                for speed and accuracy.
-              </p>
-            </div>
+          {/* ── Header — compact, always visible ── */}
+          <div className="shrink-0 pt-16 pb-4 md:pt-20 md:pb-6 text-center px-6">
+            <p
+              className="text-xs font-semibold uppercase tracking-widest mb-2"
+              style={{ color: "var(--color-accent)" }}
+            >
+              Under the Hood
+            </p>
+            <h2
+              className="text-xl font-bold tracking-tight sm:text-2xl md:text-3xl"
+              style={{ color: "var(--color-text-primary)" }}
+            >
+              Follow a message through the pipeline
+            </h2>
+          </div>
 
-            {/* Stage content — left visual, right text */}
-            <div className="flex flex-col md:flex-row items-center gap-8 md:gap-16">
-              {/* Left: visual */}
-              <div
-                className="relative flex-1 flex items-center justify-center"
-                style={{ minHeight: 280 }}
-              >
-                {STAGES.map((stage, i) => {
-                  const stageStart = i * stageSlice;
-                  const stageEnd = (i + 1) * stageSlice;
-                  const isActive =
-                    scrollProgress >= stageStart && scrollProgress < stageEnd;
-                  const stageProgress = isActive
-                    ? (scrollProgress - stageStart) / stageSlice
-                    : scrollProgress >= stageEnd
-                    ? 1
-                    : 0;
+          {/* ── Stage content — fills remaining space ── */}
+          <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-6 pb-16">
+            <div className="w-full max-w-4xl">
+              {STAGES.map((stage, i) => {
+                const isActive = i === activeIndex;
+                const stageProgress2 = isActive
+                  ? stageLocalProgress
+                  : scrollProgress >= (i + 1) * stageSlice
+                  ? 1
+                  : 0;
 
-                  return (
-                    <div
-                      key={stage.id}
-                      className="absolute flex items-center justify-center"
-                      style={{
-                        opacity: isActive ? 1 : 0,
-                        transform: isActive
-                          ? "translateY(0) scale(1)"
-                          : scrollProgress < stageStart
-                          ? "translateY(20px) scale(0.97)"
-                          : "translateY(-20px) scale(0.97)",
-                        transition: "opacity 0.5s ease, transform 0.5s ease",
-                        pointerEvents: isActive ? "auto" : "none",
-                      }}
-                    >
-                      <StageVisual
-                        visual={stage.visual}
-                        progress={stageProgress}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Right: text */}
-              <div className="relative flex-1" style={{ minHeight: 260 }}>
-                {STAGES.map((stage, i) => {
-                  const stageStart = i * stageSlice;
-                  const stageEnd = (i + 1) * stageSlice;
-                  const isActive =
-                    scrollProgress >= stageStart && scrollProgress < stageEnd;
-
-                  return (
-                    <div
-                      key={stage.id}
-                      className="absolute max-w-md"
-                      style={{
-                        opacity: isActive ? 1 : 0,
-                        transform: isActive
-                          ? "translateY(0)"
-                          : scrollProgress < stageStart
-                          ? "translateY(24px)"
-                          : "translateY(-24px)",
-                        transition: "opacity 0.5s ease, transform 0.5s ease",
-                        pointerEvents: isActive ? "auto" : "none",
-                      }}
-                    >
-                      {/* Step number */}
-                      <div
-                        className="text-xs font-mono font-semibold mb-2"
+                return (
+                  <div
+                    key={stage.id}
+                    style={{
+                      display: isActive ? "block" : "none",
+                    }}
+                  >
+                    {/* Step label + title row */}
+                    <div className="flex items-baseline gap-3 mb-4">
+                      <span
+                        className="text-xs font-mono font-semibold shrink-0"
                         style={{ color: "var(--color-accent)" }}
                       >
                         {stage.label}
-                      </div>
-
-                      {/* Title */}
+                      </span>
                       <h3
-                        className="text-xl font-bold tracking-tight sm:text-2xl mb-3"
+                        className="text-lg font-bold tracking-tight sm:text-xl md:text-2xl"
                         style={{ color: "var(--color-text-primary)" }}
                       >
                         {stage.title}
                       </h3>
+                    </div>
 
-                      {/* Description */}
-                      <p
-                        className="text-sm sm:text-base leading-relaxed mb-4"
-                        style={{ color: "var(--color-text-secondary)" }}
-                      >
-                        {stage.description}
-                      </p>
+                    {/* Two-column on md+, stacked on mobile */}
+                    <div className="flex flex-col md:flex-row gap-6 md:gap-10">
+                      {/* Left: description */}
+                      <div className="md:w-2/5 shrink-0">
+                        <p
+                          className="text-sm leading-relaxed mb-3"
+                          style={{ color: "var(--color-text-secondary)" }}
+                        >
+                          {stage.description}
+                        </p>
+                        <div
+                          className="rounded-lg px-3 py-2 text-xs sm:text-sm inline-block"
+                          style={{
+                            background: "var(--color-accent-subtle)",
+                            border: "1px solid var(--color-accent-border)",
+                            color: "var(--color-accent)",
+                            fontWeight: 500,
+                          }}
+                        >
+                          {stage.detail}
+                        </div>
+                      </div>
 
-                      {/* Detail callout */}
-                      <div
-                        className="rounded-lg px-4 py-2.5 text-xs sm:text-sm"
-                        style={{
-                          background: "var(--color-accent-subtle)",
-                          border: "1px solid var(--color-accent-border)",
-                          color: "var(--color-accent)",
-                          fontWeight: 500,
-                        }}
-                      >
-                        {stage.detail}
+                      {/* Right: visual */}
+                      <div className="flex-1 flex items-center justify-center">
+                        <StageVisual
+                          visual={stage.visual}
+                          progress={stageProgress2}
+                        />
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Progress dots */}
-            <div className="flex items-center justify-center gap-2 mt-10 md:mt-14">
-              {STAGES.map((stage, i) => {
-                const stageStart = i * stageSlice;
-                const stageEnd = (i + 1) * stageSlice;
-                const isActive =
-                  scrollProgress >= stageStart && scrollProgress < stageEnd;
-                const isPast = scrollProgress >= stageEnd;
-
-                return (
-                  <div key={stage.id} className="flex items-center gap-2">
-                    <div
-                      className="rounded-full transition-all duration-300"
-                      style={{
-                        width: isActive ? 24 : 8,
-                        height: 8,
-                        background: isActive
-                          ? "var(--color-accent)"
-                          : isPast
-                          ? "var(--color-accent)"
-                          : "var(--color-border)",
-                        opacity: isPast ? 0.4 : 1,
-                      }}
-                    />
                   </div>
                 );
               })}
+            </div>
+
+            {/* Progress dots */}
+            <div className="flex items-center justify-center gap-2 mt-8">
+              {STAGES.map((_, i) => (
+                <div
+                  key={i}
+                  className="rounded-full transition-all duration-300"
+                  style={{
+                    width: i === activeIndex ? 24 : 8,
+                    height: 8,
+                    background:
+                      i <= activeIndex
+                        ? "var(--color-accent)"
+                        : "var(--color-border)",
+                    opacity: i < activeIndex ? 0.4 : 1,
+                  }}
+                />
+              ))}
             </div>
           </div>
         </div>
