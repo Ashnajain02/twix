@@ -3,6 +3,14 @@ import { generateText } from "ai";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { chatModel } from "@/lib/ai";
+import { notFound, tooManyRequests, unauthorized } from "@/lib/http";
+import { createLogger } from "@/lib/logger";
+import { createRateLimit } from "@/lib/rate-limit";
+
+const log = createLogger("branch");
+
+// 10 branches / minute per user — branching is an LLM-backed operation.
+const limiter = createRateLimit({ max: 10, windowMs: 60_000 });
 
 // POST: Branch a tangent thread into its own standalone conversation.
 // Copies the tangent's messages into a new main thread so the user can
@@ -13,14 +21,14 @@ export async function POST(
   { params }: { params: Promise<{ threadId: string }> }
 ) {
   const session = await auth();
-  if (!session?.user?.id) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  if (!session?.user?.id) return unauthorized();
   const userId = session.user.id;
+
+  const rl = limiter.check(`u:${userId}`);
+  if (!rl.allowed) return tooManyRequests(rl.retryAfter);
 
   const { threadId } = await params;
 
-  // Fetch the source thread with messages and any merge events targeting it
   const sourceThread = await prisma.thread.findUnique({
     where: { id: threadId },
     include: {
@@ -38,46 +46,36 @@ export async function POST(
   });
 
   if (!sourceThread || sourceThread.conversation.userId !== userId) {
-    return new Response("Not found", { status: 404 });
+    return notFound();
   }
 
-  // Use highlighted text as immediate title — AI refinement happens async
   const title = sourceThread.highlightedText
     ? sourceThread.highlightedText.slice(0, 50)
     : "Branched conversation";
 
-  // Copy only USER and ASSISTANT messages (filter out SYSTEM)
-  const sourceMessages = sourceThread.messages
+  // Copy USER + ASSISTANT messages only (SYSTEM is context for the original thread).
+  const copiedMessages = sourceThread.messages
     .filter((m) => m.role !== "SYSTEM")
-    .map((m) => ({
-      role: m.role,
-      content: m.content,
-      createdAt: m.createdAt,
-    }));
+    .map((m) => ({ role: m.role, content: m.content, createdAt: m.createdAt }));
 
-  // Track which old message IDs we need to map (for merge events)
   const oldMessageIds = sourceThread.messages
     .filter((m) => m.role !== "SYSTEM")
     .map((m) => m.id);
 
-  // Preamble messages for the new thread
-  const firstMessageTime = sourceMessages[0]?.createdAt ?? new Date();
+  // Preamble messages contextualizing the branch for the user.
+  const firstMessageTime = copiedMessages[0]?.createdAt ?? new Date();
   const systemTime = new Date(firstMessageTime.getTime() - 2000);
   const bubbleTime = new Date(firstMessageTime.getTime() - 1000);
 
-  const preamble: Array<{
-    role: "SYSTEM" | "ASSISTANT";
-    content: string;
-    createdAt: Date;
-  }> = sourceThread.highlightedText
+  const preamble = sourceThread.highlightedText
     ? [
         {
-          role: "SYSTEM",
+          role: "SYSTEM" as const,
           content: `This conversation was branched from a parent discussion to explore the following highlighted text: "${sourceThread.highlightedText}". The messages below are from the original tangent thread.`,
           createdAt: systemTime,
         },
         {
-          role: "ASSISTANT",
+          role: "ASSISTANT" as const,
           content: `> **Branched from:** "${sourceThread.highlightedText.replace(/\n/g, "\n> ")}"`,
           createdAt: bubbleTime,
         },
@@ -86,9 +84,7 @@ export async function POST(
 
   const preambleCount = preamble.length;
 
-  // Create conversation + thread + messages, then replicate merge events
   const result = await prisma.$transaction(async (tx) => {
-    // Create conversation with thread and messages
     const newConversation = await tx.conversation.create({
       data: {
         userId,
@@ -97,9 +93,7 @@ export async function POST(
           create: {
             depth: 0,
             status: "ACTIVE",
-            messages: {
-              create: [...preamble, ...sourceMessages],
-            },
+            messages: { create: [...preamble, ...copiedMessages] },
           },
         },
       },
@@ -118,7 +112,7 @@ export async function POST(
     const newThread = newConversation.threads[0];
     const newMessageIds = newThread.messages.map((m) => m.id);
 
-    // Build old→new message ID mapping (skip preamble messages)
+    // Map old message IDs → new ones (skipping preamble), used to remap merge events.
     const oldToNewId = new Map<string, string>();
     for (let i = 0; i < oldMessageIds.length; i++) {
       const newIdx = preambleCount + i;
@@ -127,13 +121,12 @@ export async function POST(
       }
     }
 
-    // Replicate merge events so MergeIndicator works identically
     for (const merge of sourceThread.mergesAsTarget) {
       const newAfterMessageId = oldToNewId.get(merge.afterMessageId);
       if (newAfterMessageId) {
         await tx.mergeEvent.create({
           data: {
-            sourceThreadId: merge.sourceThreadId, // points to original merged thread (still in DB)
+            sourceThreadId: merge.sourceThreadId,
             targetThreadId: newThread.id,
             afterMessageId: newAfterMessageId,
             summary: merge.summary,
@@ -152,11 +145,13 @@ export async function POST(
     };
   });
 
-  // Fire-and-forget: generate a better AI title and backfill it
+  // Fire-and-forget: refine the title with the LLM.
   if (sourceThread.highlightedText) {
     generateText({
       model: chatModel,
-      prompt: `In 4 words or fewer, write a short title for a conversation exploring this topic: "${sourceThread.highlightedText.slice(0, 300)}". Reply with only the title — no quotes, no punctuation at the end.`,
+      prompt:
+        `In 4 words or fewer, write a short title for a conversation exploring this topic: "${sourceThread.highlightedText.slice(0, 300)}". ` +
+        "Reply with only the title — no quotes, no punctuation at the end.",
     })
       .then(({ text: rawTitle }) => {
         const aiTitle = rawTitle.trim().replace(/^["']|["']$/g, "").slice(0, 50);
@@ -167,7 +162,7 @@ export async function POST(
           });
         }
       })
-      .catch(() => {}); // non-critical
+      .catch((err) => log.error("auto-title backfill failed", err));
   }
 
   return NextResponse.json(result, { status: 201 });

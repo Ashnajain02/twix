@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { MessageRole } from "@/lib/generated/prisma/client";
 
 // Mock prisma before importing the module under test
 vi.mock("@/lib/prisma", () => ({
@@ -13,6 +14,7 @@ vi.mock("@/lib/prisma", () => ({
 // Mock embeddings — not relevant for context builder unit tests
 vi.mock("@/lib/embeddings", () => ({
   findRelevantAncestorMessages: vi.fn().mockResolvedValue([]),
+  embedQuery: vi.fn().mockResolvedValue(null),
 }));
 
 import { buildContextForThread } from "../context-builder";
@@ -21,19 +23,35 @@ import { prisma } from "@/lib/prisma";
 const mockQueryRaw = prisma.$queryRaw as ReturnType<typeof vi.fn>;
 const mockMessages = prisma.message.findMany as ReturnType<typeof vi.fn>;
 
-// Helper to build a thread object matching the expected input shape
-function makeThread(overrides: Record<string, unknown> = {}) {
+interface ThreadMessage {
+  id: string;
+  role: MessageRole;
+  content: string;
+}
+
+interface MergeFixture {
+  afterMessageId: string;
+  summary: string | null;
+  sourceThread: { knowledge: unknown; summary: string | null };
+}
+
+interface ThreadFixture {
+  id: string;
+  parentThreadId: string | null;
+  parentMessageId: string | null;
+  highlightedText: string | null;
+  messages: ThreadMessage[];
+  mergesAsTarget: MergeFixture[];
+}
+
+function makeThread(overrides: Partial<ThreadFixture> = {}): ThreadFixture {
   return {
     id: "thread-1",
     parentThreadId: null,
     parentMessageId: null,
     highlightedText: null,
-    messages: [] as Array<{ id: string; role: string; content: string }>,
-    mergesAsTarget: [] as Array<{
-      afterMessageId: string;
-      summary: string | null;
-      sourceThread: { knowledge: unknown; summary: string | null };
-    }>,
+    messages: [],
+    mergesAsTarget: [],
     ...overrides,
   };
 }
@@ -143,7 +161,7 @@ describe("buildContextForThread", () => {
 
   describe("performance", () => {
     it("builds main thread context within 5ms (no DB calls)", async () => {
-      const messages = Array.from({ length: 50 }, (_, i) => ({
+      const messages: ThreadMessage[] = Array.from({ length: 50 }, (_, i) => ({
         id: `m${i}`,
         role: i % 2 === 0 ? "USER" : "ASSISTANT",
         content: `Message ${i} with some content that has a reasonable length.`,
@@ -163,22 +181,30 @@ describe("buildContextForThread", () => {
     });
 
     it("builds tangent context within 50ms (mocked DB)", async () => {
-      const parentMessages = Array.from({ length: 20 }, (_, i) => ({
-        id: `pm${i}`,
-        role: i % 2 === 0 ? "USER" : "ASSISTANT",
-        content: `Parent message ${i}`,
-      }));
+      const parentMessages: ThreadMessage[] = Array.from(
+        { length: 20 },
+        (_, i) => ({
+          id: `pm${i}`,
+          role: i % 2 === 0 ? "USER" : "ASSISTANT",
+          content: `Parent message ${i}`,
+        })
+      );
+
+      const tangentMessages: ThreadMessage[] = Array.from(
+        { length: 10 },
+        (_, i) => ({
+          id: `tm${i}`,
+          role: i % 2 === 0 ? "USER" : "ASSISTANT",
+          content: `Tangent message ${i}`,
+        })
+      );
 
       const thread = makeThread({
         id: "tangent-perf",
         parentThreadId: "parent-thread",
         parentMessageId: "pm10",
         highlightedText: "highlighted text for tangent",
-        messages: Array.from({ length: 10 }, (_, i) => ({
-          id: `tm${i}`,
-          role: i % 2 === 0 ? "USER" : "ASSISTANT",
-          content: `Tangent message ${i}`,
-        })),
+        messages: tangentMessages,
       });
 
       mockQueryRaw.mockResolvedValue([

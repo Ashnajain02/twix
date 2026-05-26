@@ -2,6 +2,9 @@
   "name": "twix",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "next dev",
     "postinstall": "prisma generate",
@@ -11,8 +14,15 @@
     "lint:fix": "eslint --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "type-check": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "ci": "npm run lint && npm run type-check && npm run test",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:seed": "npx tsx prisma/seed.ts",
+    "db:studio": "prisma studio"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.33",
@@ -23,8 +33,9 @@
     "@floating-ui/react": "^0.27.18",
     "@prisma/adapter-pg": "^7.4.1",
     "@prisma/client": "^7.4.1",
+    "@tanstack/react-query": "^5.100.14",
+    "@tanstack/react-query-devtools": "^5.100.14",
     "@tavily/core": "^0.7.1",
-    "@types/three": "^0.183.1",
     "@uiw/react-codemirror": "^4.25.5",
     "ai": "^6.0.99",
     "bcryptjs": "^3.0.3",
@@ -35,12 +46,10 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-markdown": "^10.1.0",
-    "react-rnd": "^10.5.2",
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "tailwind-merge": "^3.5.0",
-    "three": "^0.183.2",
     "zod": "^4.3.6",
     "zustand": "^5.0.11"
   },

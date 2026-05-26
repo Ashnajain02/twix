@@ -25,7 +25,7 @@ import { prisma } from "./prisma";
 // Schema
 // ---------------------------------------------------------------------------
 
-const threadKnowledgeSchema = z.object({
+export const threadKnowledgeSchema = z.object({
   topics: z
     .array(z.string())
     .describe("Main topics and themes discussed (concise labels, 2-5 words each)"),
@@ -160,56 +160,3 @@ export function formatKnowledgeForContext(
   return lines.join("\n");
 }
 
-// ---------------------------------------------------------------------------
-// Merging knowledge across branches
-// ---------------------------------------------------------------------------
-
-/**
- * Merges knowledge from multiple threads into a single unified object.
- *
- * Useful when multiple tangents have been explored and their knowledge
- * needs to be combined. Deduplicates facts and entities, unions all arrays.
- *
- * @param knowledgeList - Array of knowledge objects to merge
- * @returns A single merged knowledge object
- */
-export function mergeKnowledge(
-  knowledgeList: ThreadKnowledge[]
-): ThreadKnowledge {
-  const merged: ThreadKnowledge = {
-    topics: [],
-    facts: [],
-    decisions: [],
-    openQuestions: [],
-    preferences: [],
-    entities: {},
-  };
-
-  for (const k of knowledgeList) {
-    merged.topics.push(...k.topics);
-    merged.facts.push(...k.facts);
-    merged.decisions.push(...k.decisions);
-    merged.openQuestions.push(...k.openQuestions);
-    merged.preferences.push(...k.preferences);
-    Object.assign(merged.entities, k.entities);
-  }
-
-  // Deduplicate arrays (case-insensitive, preserving first occurrence)
-  const dedup = (arr: string[]) => {
-    const seen = new Set<string>();
-    return arr.filter((item) => {
-      const key = item.toLowerCase().trim();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  };
-
-  merged.topics = dedup(merged.topics);
-  merged.facts = dedup(merged.facts);
-  merged.decisions = dedup(merged.decisions);
-  merged.openQuestions = dedup(merged.openQuestions);
-  merged.preferences = dedup(merged.preferences);
-
-  return merged;
-}

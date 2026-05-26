@@ -44,7 +44,7 @@ vi.mock("@/lib/context-builder", () => ({
 // Mock AI SDK — capture when streamText is called (= pre-stream phase complete)
 let streamTextCalledAt: number | null = null;
 vi.mock("ai", () => ({
-  streamText: vi.fn((...args: unknown[]) => {
+  streamText: vi.fn((..._args: unknown[]) => {
     streamTextCalledAt = performance.now();
     return {
       toUIMessageStreamResponse: () =>
@@ -77,11 +77,9 @@ describe("Chat API Pre-Stream Performance", () => {
       id: "thread-1",
       conversationId: "conv-1",
       depth: 0,
-      conversation: {
-        id: "conv-1",
-        userId: "user-1",
-        title: "New Conversation",
-      },
+      messages: [],
+      mergesAsTarget: [],
+      conversation: { userId: "user-1", title: "New Conversation" },
     });
   });
 
@@ -202,7 +200,9 @@ describe("Chat API Pre-Stream Performance", () => {
       id: "thread-1",
       conversationId: "conv-1",
       depth: 0,
-      conversation: { id: "conv-1", userId: "other-user", title: "Not yours" },
+      messages: [],
+      mergesAsTarget: [],
+      conversation: { userId: "other-user", title: "Not yours" },
     });
 
     const { POST } = await import("@/app/api/chat/route");

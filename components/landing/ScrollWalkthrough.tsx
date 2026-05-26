@@ -1,8 +1,32 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useScrollProgress } from "@/hooks/use-scroll-progress";
+
+/* ─── Phase thresholds (scroll progress 0–1) ──────────────────────
+   Each value is the scroll fraction at which a given visual phase
+   appears/disappears. Tweak these to retime the walkthrough. */
+const PHASES = {
+  // Initial conversation appears
+  user: 0.03,
+  assistantStart: 0.08,
+  assistantDuration: 0.22, // assistant text streams over this fraction
+  // Highlight + tangent prompt popover
+  highlight: 0.32,
+  popupStart: 0.37,
+  popupEnd: 0.43,
+  // Tangent opens, the user asks, the assistant replies
+  tangentOpens: 0.43,
+  tangentCloses: 0.82,
+  tangentUser: 0.48,
+  tangentAssistantStart: 0.52,
+  tangentAssistantDuration: 0.16,
+  // Merge back to main + CTA
+  merge: 0.82,
+  cta: 0.92,
+} as const;
 
 /* ─── Content ──────────────────────────────────────────────────── */
 const USER_MSG = "Hey! What is Twix and what can it do?";
@@ -86,47 +110,49 @@ function AssistantText({
 /* ─── Main ─────────────────────────────────────────────────────── */
 export function ScrollWalkthrough() {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [p, setP] = useState(0);
+  const p = useScrollProgress(scrollRef);
   const [mergeModalOpen, setMergeModalOpen] = useState(false);
 
-  useEffect(() => {
-    const onScroll = () => {
-      const el = scrollRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const total = el.offsetHeight - window.innerHeight;
-      if (total <= 0) return;
-      setP(Math.max(0, Math.min(1, -rect.top / total)));
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
-
-  // Phases — spread out with breathing room before merge
-  const showUser = p > 0.03;
-  const showAst = p > 0.08;
-  const astCount = Math.floor(ASSISTANT_WORDS.length * Math.min(1, Math.max(0, (p - 0.08) / 0.22)));
-  const hl = p > 0.32;
-  const popup = p > 0.37 && p < 0.43;
-  const tOpen = p > 0.43 && p < 0.82;
-  const tUser = p > 0.48;
-  const tAst = p > 0.52;
-  const tAstCount = Math.floor(TANGENT_WORDS.length * Math.min(1, Math.max(0, (p - 0.52) / 0.16)));
-  // Tangent answer fully visible at ~0.68. Merge at 0.82 = 14% gap (~100vh of just reading)
-  const merged = p > 0.82;
-  const cta = p > 0.92;
+  // Phase booleans derived from scroll progress.
+  const showUser = p > PHASES.user;
+  const showAst = p > PHASES.assistantStart;
+  const astCount = Math.floor(
+    ASSISTANT_WORDS.length *
+      Math.min(
+        1,
+        Math.max(0, (p - PHASES.assistantStart) / PHASES.assistantDuration)
+      )
+  );
+  const hl = p > PHASES.highlight;
+  const popup = p > PHASES.popupStart && p < PHASES.popupEnd;
+  const tOpen = p > PHASES.tangentOpens && p < PHASES.tangentCloses;
+  const tUser = p > PHASES.tangentUser;
+  const tAst = p > PHASES.tangentAssistantStart;
+  const tAstCount = Math.floor(
+    TANGENT_WORDS.length *
+      Math.min(
+        1,
+        Math.max(
+          0,
+          (p - PHASES.tangentAssistantStart) / PHASES.tangentAssistantDuration
+        )
+      )
+  );
+  const merged = p > PHASES.merge;
+  const cta = p > PHASES.cta;
 
   return (
     <div ref={scrollRef} style={{ height: "700vh" }}>
-      {/* Fixed full-viewport app frame — z-index above nav (z-50) */}
+      {/* Sticky full-viewport app frame — z-index above nav (z-50).
+          Sticky (vs fixed) ties visibility to actual DOM position, so the
+          overlay slides out naturally as the section exits — no trailing
+          empty space before the next section. */}
       <div
-        className="fixed inset-0 z-[60] flex flex-col"
+        className="sticky top-0 left-0 right-0 h-screen z-[60] flex flex-col"
         style={{
           background: "var(--color-bg-base)",
-          opacity: p > 0 && p < 1 ? 1 : 0,
-          pointerEvents: p > 0 && p < 1 ? "none" : "none",
-          visibility: p >= 1 ? "hidden" as const : "visible" as const,
+          opacity: p > 0 ? 1 : 0,
+          pointerEvents: "none",
           transition: "opacity 0.3s ease",
         }}
       >

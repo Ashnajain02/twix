@@ -1,23 +1,19 @@
 "use client";
 
 import { TangentThread } from "./TangentThread";
-import type { TangentWindowState, MergeEvent } from "@/types";
+import type { TangentWindowState } from "@/types";
 
 interface TangentPanelProps {
   tangent: TangentWindowState;
   conversationId: string;
-  /** ID of the message in this panel that spawned the next deeper tangent */
+  /** ID of the message in this panel that spawned the next deeper tangent. */
   activeChildMessageId?: string;
-  /** The highlighted text within the active-child message */
+  /** The highlighted text within the active-child message. */
   activeHighlightedText?: string;
-  /** All sibling tangents (children of the same parent) — shown as tabs */
+  /** All sibling tangents (children of the same parent) — shown as tabs. */
   siblings?: TangentWindowState[];
-  /** Called when the user clicks a sibling tab */
+  /** Called when the user clicks a sibling tab. */
   onSelectSibling?: (threadId: string) => void;
-  /** Increment to trigger a messages re-fetch from DB (e.g. after a child merges into this thread) */
-  refreshTrigger?: number;
-  /** Merge events targeting this thread — displayed as inline indicators */
-  mergeEvents?: MergeEvent[];
   onOpenTangent: (
     threadId: string,
     messageId: string,
@@ -36,8 +32,6 @@ export function TangentPanel({
   activeHighlightedText,
   siblings,
   onSelectSibling,
-  refreshTrigger,
-  mergeEvents,
   onOpenTangent,
   onMerge,
   onBranch,
@@ -101,55 +95,42 @@ export function TangentPanel({
 
           {/* Action buttons */}
           <div className="flex items-center gap-1 flex-shrink-0 ml-2">
-            {/* Merge */}
             <button
+              type="button"
               onClick={() => onMerge(tangent.threadId)}
-              className="rounded-md px-2.5 py-1 text-xs font-medium transition-colors"
-              style={{
-                background: "transparent",
-                color: "var(--color-success)",
-                border: "1px solid var(--color-success)",
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(34, 197, 94, 0.08)")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              className="btn-ghost btn-ghost--success rounded-md px-2.5 py-1 text-xs font-medium transition-colors"
               title="Merge back into parent thread"
             >
               Merge
             </button>
 
-            {/* Branch */}
             <button
+              type="button"
               onClick={() => onBranch(tangent.threadId)}
-              className="rounded-md px-2.5 py-1 text-xs font-medium transition-colors"
-              style={{
-                background: "transparent",
-                color: "var(--color-info)",
-                border: "1px solid var(--color-info)",
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(59, 130, 246, 0.08)")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              className="btn-ghost btn-ghost--info rounded-md px-2.5 py-1 text-xs font-medium transition-colors"
               title="Branch into its own conversation"
             >
               Branch
             </button>
 
-            {/* Close */}
             <button
+              type="button"
               onClick={() => onClose(tangent.threadId)}
-              className="rounded-md p-1 transition-colors"
-              style={{ color: "var(--color-text-muted)" }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "rgba(239, 68, 68, 0.06)";
-                e.currentTarget.style.color = "var(--color-error)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "transparent";
-                e.currentTarget.style.color = "var(--color-text-muted)";
-              }}
-              title="Close"
+              className="btn-icon-muted rounded-md p-1 transition-colors"
+              aria-label="Close tangent"
             >
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             </button>
           </div>
@@ -163,8 +144,6 @@ export function TangentPanel({
         conversationId={conversationId}
         activeChildMessageId={activeChildMessageId}
         activeHighlightedText={activeHighlightedText}
-        refreshTrigger={refreshTrigger}
-        mergeEvents={mergeEvents}
         onOpenTangent={onOpenTangent}
       />
     </div>

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { notFound, unauthorized } from "@/lib/http";
 
 // GET: Get all messages for a thread
 export async function GET(
@@ -8,19 +9,17 @@ export async function GET(
   { params }: { params: Promise<{ threadId: string }> }
 ) {
   const session = await auth();
-  if (!session?.user?.id) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  if (!session?.user?.id) return unauthorized();
 
   const { threadId } = await params;
 
   const thread = await prisma.thread.findUnique({
     where: { id: threadId },
-    include: { conversation: true },
+    select: { conversation: { select: { userId: true } } },
   });
 
   if (!thread || thread.conversation.userId !== session.user.id) {
-    return new Response("Not found", { status: 404 });
+    return notFound();
   }
 
   const messages = await prisma.message.findMany({

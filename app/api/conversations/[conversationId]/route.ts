@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-
+import { notFound, unauthorized, zodError } from "@/lib/http";
+import { updateConversationSchema } from "@/lib/validators";
 
 // GET: Get conversation with its thread tree
 export async function GET(
@@ -9,23 +10,17 @@ export async function GET(
   { params }: { params: Promise<{ conversationId: string }> }
 ) {
   const session = await auth();
-  if (!session?.user?.id) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  if (!session?.user?.id) return unauthorized();
 
   const { conversationId } = await params;
 
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    include: {
-      threads: {
-        orderBy: { createdAt: "asc" },
-      },
-    },
+    include: { threads: { orderBy: { createdAt: "asc" } } },
   });
 
   if (!conversation || conversation.userId !== session.user.id) {
-    return new Response("Not found", { status: 404 });
+    return notFound();
   }
 
   return NextResponse.json(conversation);
@@ -37,26 +32,25 @@ export async function PATCH(
   { params }: { params: Promise<{ conversationId: string }> }
 ) {
   const session = await auth();
-  if (!session?.user?.id) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  if (!session?.user?.id) return unauthorized();
 
   const { conversationId } = await params;
-  const { title } = await req.json();
 
-  const conversation = await prisma.conversation.findUnique({
-    where: { id: conversationId },
+  const body = await req.json().catch(() => ({}));
+  const parsed = updateConversationSchema.safeParse(body);
+  if (!parsed.success) return zodError(parsed.error);
+
+  // Update + ownership check in one statement.
+  const result = await prisma.conversation.updateMany({
+    where: { id: conversationId, userId: session.user.id },
+    data: { title: parsed.data.title },
   });
 
-  if (!conversation || conversation.userId !== session.user.id) {
-    return new Response("Not found", { status: 404 });
-  }
+  if (result.count === 0) return notFound();
 
-  const updated = await prisma.conversation.update({
+  const updated = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    data: { title },
   });
-
   return NextResponse.json(updated);
 }
 
@@ -66,25 +60,25 @@ export async function DELETE(
   { params }: { params: Promise<{ conversationId: string }> }
 ) {
   const session = await auth();
-  if (!session?.user?.id) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  if (!session?.user?.id) return unauthorized();
 
   const { conversationId } = await params;
 
-  const conversation = await prisma.conversation.findUnique({
-    where: { id: conversationId },
-    include: { threads: { select: { id: true } } },
+  // updateMany returns count — gives us a one-statement auth-checked existence test.
+  const owned = await prisma.conversation.findFirst({
+    where: { id: conversationId, userId: session.user.id },
+    select: { id: true, threads: { select: { id: true } } },
   });
 
-  if (!conversation || conversation.userId !== session.user.id) {
-    return new Response("Not found", { status: 404 });
-  }
+  if (!owned) return notFound();
 
-  const threadIds = conversation.threads.map((t) => t.id);
+  const threadIds = owned.threads.map((t) => t.id);
 
+  // Conversation → threads → messages cascade is correct in the schema; the
+  // self-referential Thread parentThreadId/parentMessageId FKs default to
+  // SET NULL (see schema migration). MergeEvents have no cascade configured,
+  // so we delete them explicitly.
   await prisma.$transaction(async (tx) => {
-    // 1. Delete merge events — they reference Thread and Message with no cascade
     if (threadIds.length > 0) {
       await tx.mergeEvent.deleteMany({
         where: {
@@ -94,16 +88,12 @@ export async function DELETE(
           ],
         },
       });
-
-      // 2. Clear self-referential FKs on threads (parentThreadId, parentMessageId)
-      //    so the cascade delete can proceed without FK constraint violations
+      // Clear self-referential FKs first so cascade-delete from Conversation works
       await tx.thread.updateMany({
         where: { conversationId },
         data: { parentThreadId: null, parentMessageId: null },
       });
     }
-
-    // 3. Delete conversation — now cascades cleanly to threads → messages
     await tx.conversation.delete({ where: { id: conversationId } });
   });
 

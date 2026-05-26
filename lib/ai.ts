@@ -1,6 +1,26 @@
 import { openai } from "@ai-sdk/openai";
+import type { MessageRole } from "@/lib/generated/prisma/client";
 
 export const chatModel = openai("gpt-4.1-nano");
+
+/** Role used by the AI SDK ("user" | "assistant" | "system"). */
+export type AIRole = "user" | "assistant" | "system";
+
+/**
+ * Convert a Prisma `MessageRole` (uppercase enum) to the AI SDK role
+ * (lowercase string). Exhaustive — adding a new MessageRole variant
+ * is a compile error here.
+ */
+export function toAIRole(role: MessageRole): AIRole {
+  switch (role) {
+    case "USER":
+      return "user";
+    case "ASSISTANT":
+      return "assistant";
+    case "SYSTEM":
+      return "system";
+  }
+}
 
 const CORE_PROMPT = `You are Twix, a highly capable AI assistant. Today's date is {{DATE}}.
 

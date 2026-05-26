@@ -1,7 +1,9 @@
 import { generateText } from "ai";
+import { Prisma } from "@/lib/generated/prisma/client";
 import { chatModel } from "./ai";
 import { prisma } from "./prisma";
 import { distillThreadKnowledge } from "./knowledge";
+import { createLogger } from "./logger";
 
 /**
  * Eager thread summarization and knowledge distillation.
@@ -14,12 +16,11 @@ import { distillThreadKnowledge } from "./knowledge";
  * Both are stored on the Thread row for instant retrieval by the context builder.
  */
 
-/** Regenerate after this many new messages since the last update */
+const log = createLogger("summarizer");
+
+/** Regenerate after this many new messages since the last update. */
 const SUMMARY_THRESHOLD = 20;
 
-/**
- * Checks whether a thread's summary/knowledge is stale and regenerates if needed.
- */
 export async function maybeUpdateThreadSummary(
   threadId: string
 ): Promise<void> {
@@ -34,18 +35,16 @@ export async function maybeUpdateThreadSummary(
   if (!thread) return;
 
   const newSinceLastSummary = messageCount - thread.summaryMessageCount;
-
-  // Don't process threads that are too short or haven't changed enough
   if (messageCount < SUMMARY_THRESHOLD || newSinceLastSummary < SUMMARY_THRESHOLD) {
     return;
   }
 
-  console.log(
-    `[summarizer] Thread ${threadId}: ${messageCount} msgs, ` +
-    `${newSinceLastSummary} new since last summary. Regenerating...`
-  );
+  log.info("regenerating summary", {
+    threadId,
+    messageCount,
+    newSinceLastSummary,
+  });
 
-  // Run both operations in parallel — they're independent
   const [summary, knowledge] = await Promise.all([
     generatePlainSummary(threadId),
     distillThreadKnowledge(threadId),
@@ -55,22 +54,20 @@ export async function maybeUpdateThreadSummary(
     where: { id: threadId },
     data: {
       summary,
-      knowledge: knowledge ? JSON.parse(JSON.stringify(knowledge)) : undefined,
+      knowledge: knowledge
+        ? (knowledge as unknown as Prisma.InputJsonValue)
+        : undefined,
       summaryMessageCount: messageCount,
     },
   });
 
-  console.log(
-    `[summarizer] Thread ${threadId}: updated ` +
-    `(summary: ${summary.length} chars, ` +
-    `knowledge: ${knowledge ? Object.keys(knowledge).length + " fields" : "skipped"})`
-  );
+  log.info("summary updated", {
+    threadId,
+    summaryChars: summary.length,
+    knowledgeFields: knowledge ? Object.keys(knowledge).length : 0,
+  });
 }
 
-/**
- * Generates a plain-text paragraph summary of a thread.
- * Kept alongside structured knowledge as a human-readable fallback.
- */
 async function generatePlainSummary(threadId: string): Promise<string> {
   const messages = await prisma.message.findMany({
     where: { threadId, role: { not: "SYSTEM" } },

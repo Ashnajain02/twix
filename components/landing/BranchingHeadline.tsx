@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useMemo, useRef } from "react";
+import { useScrollProgress } from "@/hooks/use-scroll-progress";
 
 /*
   Scroll-driven hero:
@@ -35,29 +36,20 @@ const LINE2 = ["Your", "AI", "should", "too."];
 // Word steps: 3 words + fork + 4 words = 8 steps in the branching section
 const WORD_STEPS = LINE1.length + 1 + LINE2.length; // 8
 
+// Returns true if the user has prefers-reduced-motion. Safe during SSR.
+function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 export function BranchingHeadline() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [progress, setProgress] = useState(0);
+  // Users who opted out of motion see the final state immediately.
+  const progress = useScrollProgress(containerRef, {
+    disabled: prefersReducedMotion(),
+  });
 
   const twixOffsets = useMemo(() => scatterOffsets(TWIX.length, 42), []);
-
-  useEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setProgress(1);
-      return;
-    }
-    const onScroll = () => {
-      const el = containerRef.current;
-      if (!el) return;
-      const scrollable = el.offsetHeight - window.innerHeight;
-      if (scrollable <= 0) return;
-      const rect = el.getBoundingClientRect();
-      setProgress(Math.max(0, Math.min(1, -rect.top / scrollable)));
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
 
   // Sub-range helper
   const phase = (start: number, end: number) =>
@@ -65,13 +57,13 @@ export function BranchingHeadline() {
 
   const ease = (t: number) => 1 - Math.pow(1 - t, 3);
 
-  // Twix dissolve: visible 0-30%, dissolves 15-30%
-  const twixDissolve = phase(0.13, 0.28);
-  const twixVisible = progress < 0.28;
+  // Twix dissolve: visible 0-25%, dissolves 12-25%
+  const twixDissolve = phase(0.12, 0.25);
+  const twixVisible = progress < 0.25;
 
-  // Branching words: appear 28-80%, crossfades in as twix fades out
-  const branchingVisible = progress >= 0.22;
-  const branchingProgress = phase(0.28, 0.78);
+  // Branching words: appear 22-70%, crossfades in as twix fades out
+  const branchingVisible = progress >= 0.20;
+  const branchingProgress = phase(0.25, 0.70);
   const wordStep = branchingProgress * WORD_STEPS;
 
   const line1Show = LINE1.map((_, i) => wordStep >= i + 0.5);
@@ -79,12 +71,13 @@ export function BranchingHeadline() {
   const forkGrow = Math.min(1, Math.max(0, wordStep - LINE1.length) / 1);
   const line2Show = LINE2.map((_, i) => wordStep >= LINE1.length + 1 + i + 0.5);
 
-  // Subtitle + hint
-  const subtitleShow = phase(0.80, 0.90);
-  const hintShow = phase(0.90, 0.97);
+  // Subtitle + hint — both finish earlier so there's no dead tail
+  // between the hint appearing and the next section kicking in.
+  const subtitleShow = phase(0.72, 0.82);
+  const hintShow = phase(0.82, 0.92);
 
   return (
-    <div ref={containerRef} style={{ height: "700vh" }}>
+    <div ref={containerRef} style={{ height: "400vh" }}>
       <div
         className="sticky top-0 flex items-center justify-center"
         style={{ height: "100vh" }}

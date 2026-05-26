@@ -1,15 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo } from "react";
 import { MainThread } from "./MainThread";
 import { TangentPanel } from "./TangentPanel";
-
 import { useTangentStore } from "@/store/tangent-store";
-
-import { useConversationStore } from "@/store/conversation-store";
-import { reconstructTangentState } from "@/lib/tangent-utils";
-import type { MergeEvent, TangentWindowState } from "@/types";
+import { useConversationTangents } from "@/lib/api-hooks";
+import { useTangentActions } from "@/hooks/use-tangent-actions";
+import type { TangentWindowState } from "@/types";
 
 interface ChatPageProps {
   conversationId: string;
@@ -28,280 +25,97 @@ export function ChatPage({
   initialMessages,
   initialTangents,
 }: ChatPageProps) {
-  const router = useRouter();
-
+  // ─── Tangent store (UI state) ─────────────────────────────────────
   const openTangents = useTangentStore((s) => s.openTangents);
   const activeChildByParent = useTangentStore((s) => s.activeChildByParent);
   const viewParentId = useTangentStore((s) => s.viewParentId);
   const storeConversationId = useTangentStore((s) => s.conversationId);
   const hydrate = useTangentStore((s) => s.hydrate);
-  const openTangentAction = useTangentStore((s) => s.openTangent);
-  const closeTangent = useTangentStore((s) => s.closeTangent);
   const navigateTo = useTangentStore((s) => s.navigateTo);
   const setActiveChild = useTangentStore((s) => s.setActiveChild);
 
-  const { addConversation } = useConversationStore();
+  // ─── Server-side tangent data ─────────────────────────────────────
+  // SSR-provided `initialTangents` gives us a fast first render; the React
+  // Query fetch then ensures we surface any tangents created after the
+  // server payload was cached (Next.js Router Cache can serve stale RSC).
+  const tangentsQuery = useConversationTangents(conversationId);
 
-  // Hydrate tangent store from server data on mount or conversation switch.
-  // First hydrate from server-provided props (fast SSR path), then fetch
-  // fresh data from the API to handle stale RSC payloads from Next.js
-  // Router Cache (e.g. navigating back to a conversation after branching).
+  // On mount / conversation switch — hydrate the store from server-provided
+  // initial data, then again whenever the server data drifts from the store.
   useEffect(() => {
     if (storeConversationId !== conversationId) {
       hydrate(conversationId, initialTangents ?? []);
     }
-
-    // Client-side fetch ensures we always have the latest tangent state
-    fetch(`/api/conversations/${conversationId}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!data?.threads) return;
-        const main = data.threads.find(
-          (t: { parentThreadId: string | null }) => !t.parentThreadId
-        );
-        if (!main) return;
-        const fresh = reconstructTangentState(data.threads, main.id);
-        // Only re-hydrate if the tangent set actually changed
-        const currentIds = useTangentStore
-          .getState()
-          .openTangents.map((t) => t.threadId)
-          .sort()
-          .join(",");
-        const freshIds = fresh
-          .map((t) => t.threadId)
-          .sort()
-          .join(",");
-        if (currentIds !== freshIds) {
-          hydrate(conversationId, fresh);
-        }
-      })
-      .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId]);
-
-  // Main-thread state
-  const [mergeEvents, setMergeEvents] = useState<MergeEvent[]>([]);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
-
-  // Per-tangent state — keyed by threadId
-  const [threadMergeEvents, setThreadMergeEvents] = useState<
-    Record<string, MergeEvent[]>
-  >({});
-  const [threadRefreshTriggers, setThreadRefreshTriggers] = useState<
-    Record<string, number>
-  >({});
-
-  // Fetch merge events for any thread (main or tangent)
-  const fetchThreadMergeEvents = useCallback(
-    async (threadId: string, isMain: boolean) => {
-      try {
-        const res = await fetch(`/api/threads/${threadId}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        const events: MergeEvent[] = data.mergesAsTarget || [];
-        if (isMain) {
-          setMergeEvents(events);
-        } else {
-          setThreadMergeEvents((prev) => ({ ...prev, [threadId]: events }));
-        }
-      } catch {
-        // silently fail
-      }
-    },
-    []
-  );
+  }, [conversationId, storeConversationId, initialTangents, hydrate]);
 
   useEffect(() => {
-    fetchThreadMergeEvents(mainThreadId, true);
-  }, [mainThreadId, fetchThreadMergeEvents]);
-
-  // Fetch merge events for tangent threads — runs after hydration populates openTangents
-  useEffect(() => {
-    for (const tangent of openTangents) {
-      fetchThreadMergeEvents(tangent.threadId, false);
+    const fresh = tangentsQuery.data;
+    if (!fresh) return;
+    // Re-hydrate only when the server knows about tangents the store doesn't
+    // (e.g. stale RSC payload, another tab opened a tangent). NEVER when the
+    // store has more than the server — that's the optimistic-update window
+    // for `openTangentLocal`, and overwriting it would wipe the just-created
+    // tangent before useCreateTangent's onSuccess populates the cache.
+    const storeIds = new Set(openTangents.map((t) => t.threadId));
+    const serverHasNew = fresh.some((t) => !storeIds.has(t.threadId));
+    if (serverHasNew) {
+      hydrate(conversationId, fresh);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openTangents.length, fetchThreadMergeEvents]);
+  }, [tangentsQuery.data, conversationId, openTangents, hydrate]);
 
-  // Handle opening a tangent thread
+  // ─── Actions ──────────────────────────────────────────────────────
+  const actions = useTangentActions(conversationId, mainThreadId);
+
+  // Adapter: the text-selection menu hands us a DOMRect we don't use here.
   const handleOpenTangent = useCallback(
-    async (
-      threadId: string,
-      messageId: string,
-      selectedText: string,
-      _rect: DOMRect
-    ) => {
-      try {
-        const res = await fetch(
-          `/api/conversations/${conversationId}/threads`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              parentThreadId: threadId,
-              highlightedText: selectedText,
-            }),
-          }
-        );
-
-        if (!res.ok) return;
-
-        const tangentThread = await res.json();
-
-        openTangentAction({
-          threadId: tangentThread.id,
-          // Normalize: if the parent is the main thread, use "main" so that
-          // viewParentId === "main" checks work correctly in ChatPage.
-          parentThreadId: threadId === mainThreadId ? "main" : threadId,
-          parentMessageId: messageId,
-          highlightedText: selectedText,
-          depth: tangentThread.depth,
-        });
-      } catch {
-        // silently fail
-      }
+    (threadId: string, messageId: string, selectedText: string, _rect: DOMRect) => {
+      actions.openTangent(threadId, messageId, selectedText);
     },
-    [conversationId, mainThreadId, openTangentAction]
+    [actions]
   );
 
-  // Handle merging a tangent
-  const handleMerge = useCallback(
-    async (threadId: string) => {
-      try {
-        // Read parent BEFORE the async call (store might change)
-        const currentTangents = useTangentStore.getState().openTangents;
-        const merged = currentTangents.find((t) => t.threadId === threadId);
-        const targetThreadId = merged?.parentThreadId ?? null;
-
-        const res = await fetch(`/api/threads/${threadId}/merge`, {
-          method: "POST",
-        });
-
-        if (!res.ok) return;
-
-        // Use the merge event returned by the API directly — no extra fetch
-        const newMergeEvent: MergeEvent = await res.json();
-
-        // Update merge events FIRST, then close tangent. This avoids a render
-        // race where Zustand's closeTangent triggers an immediate re-render
-        // (TangentPanel unmounts) while React state updates (merge indicator
-        // insertion) are still pending — which causes "insertBefore" DOM errors.
-        if (!targetThreadId || targetThreadId === "main" || targetThreadId === mainThreadId) {
-          setMergeEvents((prev) => [...prev, newMergeEvent]);
-          setRefreshTrigger((n) => n + 1);
-        } else {
-          setThreadMergeEvents((prev) => ({
-            ...prev,
-            [targetThreadId]: [...(prev[targetThreadId] || []), newMergeEvent],
-          }));
-          setThreadRefreshTriggers((prev) => ({
-            ...prev,
-            [targetThreadId]: (prev[targetThreadId] ?? 0) + 1,
-          }));
-        }
-
-        // Close tangent AFTER merge state is queued — React batches these
-        closeTangent(threadId);
-      } catch {
-        // silently fail
-      }
-    },
-    [closeTangent, mainThreadId]
+  // ─── Derived state (all memoized) ─────────────────────────────────
+  const tangentMap = useMemo(
+    () => new Map(openTangents.map((t) => [t.threadId, t])),
+    [openTangents]
   );
 
-  // Handle branching a tangent into its own standalone conversation
-  const handleBranch = useCallback(
-    async (threadId: string) => {
-      try {
-        const res = await fetch(`/api/threads/${threadId}/branch`, {
-          method: "POST",
-        });
+  const rightTangent = useMemo(() => {
+    const id = activeChildByParent[viewParentId];
+    return id ? tangentMap.get(id) : undefined;
+  }, [activeChildByParent, viewParentId, tangentMap]);
 
-        if (!res.ok) return;
-
-        const { conversation } = await res.json();
-
-        // Fire-and-forget: archive the thread in DB (non-blocking)
-        fetch(`/api/threads/${threadId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "ARCHIVED" }),
-        }).catch(() => {});
-
-        addConversation(conversation);
-        closeTangent(threadId);
-        router.push(`/c/${conversation.id}`);
-      } catch {
-        // silently fail
-      }
-    },
-    [closeTangent, addConversation, router]
+  const rightSiblings = useMemo(
+    () => openTangents.filter((t) => t.parentThreadId === viewParentId),
+    [openTangents, viewParentId]
   );
 
-  // Handle explicitly closing a tangent (X button) — archives in DB + removes from store
-  const handleClose = useCallback(
-    async (threadId: string) => {
-      try {
-        await fetch(`/api/threads/${threadId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "ARCHIVED" }),
-        });
-      } catch {
-        // If API fails, still close locally. Thread reappears on next load (fail-open).
-      }
-      closeTangent(threadId);
-    },
-    [closeTangent]
+  const mainActiveChildTangent = useMemo(
+    () => tangentMap.get(activeChildByParent["main"] ?? ""),
+    [tangentMap, activeChildByParent]
   );
 
-  // ── Panel computation ──────────────────────────────────────────────────────
-  const tangentMap = new Map(openTangents.map((t) => [t.threadId, t]));
-
-  // Right panel: the active child of the left panel
-  const activeChildId = activeChildByParent[viewParentId];
-  const rightTangent = activeChildId ? tangentMap.get(activeChildId) : undefined;
-
-  // Sibling tabs for the right panel (all children of the left panel)
-  const rightSiblings = openTangents.filter(
-    (t) => t.parentThreadId === viewParentId
-  );
-
-  // activeChildMessageId for the right panel connector (shown in the LEFT panel)
   const leftActiveChildMessageId = rightTangent?.parentMessageId;
-
-  // activeChildMessageId for the main thread — always track its active child
-  // so the connector is ready when Main comes back into view
-  const mainActiveChildTangent = tangentMap.get(
-    activeChildByParent["main"] ?? ""
-  );
+  const leftActiveChildHighlightedText = rightTangent?.highlightedText;
   const mainActiveChildMessageId = mainActiveChildTangent?.parentMessageId;
   const mainActiveChildHighlightedText = mainActiveChildTangent?.highlightedText;
-  const leftActiveChildHighlightedText = rightTangent?.highlightedText;
 
-  // ── Breadcrumb computation ─────────────────────────────────────────────────
-  // 1. Walk UP from viewParentId → "main" to build the left-side path.
-  // 2. Then walk DOWN the activeChildByParent chain to show the full depth.
-  // This ensures ALL open tangents (not just the visible pair) appear in the
-  // breadcrumb and are navigable even after clicking "back".
+  // Breadcrumb: walk UP from viewParentId → main, then DOWN the active-child
+  // chain, so deeply-nested tangents stay reachable after the user "zooms out".
   const breadcrumbPath = useMemo(() => {
     const pathIds: string[] = [];
 
-    // Walk up from viewParentId to "main"
     let cur = viewParentId;
     const upVisited = new Set<string>();
     while (cur !== "main" && !upVisited.has(cur)) {
       upVisited.add(cur);
       if (!tangentMap.has(cur)) break;
       pathIds.unshift(cur);
-      const node = tangentMap.get(cur);
-      cur = node?.parentThreadId ?? "main";
+      cur = tangentMap.get(cur)?.parentThreadId ?? "main";
     }
     pathIds.unshift("main");
 
-    // Walk DOWN the activeChildByParent chain
-    const lastVisible = pathIds[pathIds.length - 1];
-    let deepCur = activeChildByParent[lastVisible];
+    let deepCur = activeChildByParent[pathIds[pathIds.length - 1]];
     const downVisited = new Set<string>(upVisited);
     while (deepCur && tangentMap.has(deepCur) && !downVisited.has(deepCur)) {
       downVisited.add(deepCur);
@@ -326,20 +140,14 @@ export function ChatPage({
     (item: { id: string; parentId: string | null }) => {
       if (item.id === "main") {
         navigateTo("main");
-      } else {
-        // If this tangent has an active child (i.e. there are deeper tangents),
-        // zoom in so it becomes the left panel.
-        // If it has no children, do nothing — it's already visible as the right panel.
-        const activeChildId = activeChildByParent[item.id];
-        const hasActiveChild =
-          !!activeChildId &&
-          openTangents.some((t) => t.threadId === activeChildId);
-        if (hasActiveChild) {
-          navigateTo(item.id);
-        }
+        return;
       }
+      // If this tangent has an active child, zoom in so it becomes the left
+      // panel. Otherwise it's already visible as the right panel — no-op.
+      const childId = activeChildByParent[item.id];
+      if (childId && tangentMap.has(childId)) navigateTo(item.id);
     },
-    [navigateTo, activeChildByParent, openTangents]
+    [navigateTo, activeChildByParent, tangentMap]
   );
 
   return (
@@ -353,56 +161,48 @@ export function ChatPage({
             borderBottom: "1px solid var(--color-border-subtle)",
           }}
         >
-          {breadcrumbPath.map((item, idx) => (
-            <div
-              key={item.id}
-              className="flex items-center gap-1 flex-shrink-0"
-            >
-              {idx > 0 && (
-                <svg
-                  className="h-3 w-3 flex-shrink-0"
-                  style={{ color: "var(--color-text-secondary)" }}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
+          {breadcrumbPath.map((item, idx) => {
+            const isActive =
+              item.id === viewParentId ||
+              (item.id === "main" && viewParentId === "main");
+            return (
+              <div key={item.id} className="flex items-center gap-1 flex-shrink-0">
+                {idx > 0 && (
+                  <svg
+                    className="h-3 w-3 flex-shrink-0"
+                    style={{ color: "var(--color-text-secondary)" }}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 5l7 7-7 7"
+                    />
+                  </svg>
+                )}
+                <button
+                  onClick={() => handleBreadcrumbClick(item)}
+                  className="rounded px-1.5 py-0.5 text-xs font-medium transition-colors"
+                  style={{
+                    color: isActive ? "var(--color-accent)" : "var(--color-text-muted)",
+                    fontWeight: isActive ? 600 : 400,
+                    background: isActive ? "var(--color-accent-subtle)" : "transparent",
+                  }}
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 5l7 7-7 7"
-                  />
-                </svg>
-              )}
-              <button
-                onClick={() => handleBreadcrumbClick(item)}
-                className="rounded px-1.5 py-0.5 text-xs font-medium transition-colors"
-                style={{
-                  color:
-                    item.id === viewParentId || (item.id === "main" && viewParentId === "main")
-                      ? "var(--color-accent)"
-                      : "var(--color-text-muted)",
-                  fontWeight:
-                    item.id === viewParentId || (item.id === "main" && viewParentId === "main")
-                      ? 600 : 400,
-                  background:
-                    item.id === viewParentId || (item.id === "main" && viewParentId === "main")
-                      ? "var(--color-accent-subtle)"
-                      : "transparent",
-                }}
-              >
-                {item.label}
-              </button>
-            </div>
-          ))}
+                  {item.label}
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* Panel area — all panels are always mounted; only 2 are visible at a time.
-          Using CSS display:none instead of conditional rendering preserves useChat
-          state (messages, streaming status) when a panel shifts out of view. */}
+      {/* Panel area. All panels mount once; visibility toggles via display.
+          Keeps `useChat` state alive when a panel shifts out of view. */}
       <div className="flex flex-1 min-h-0">
-        {/* Main thread — always mounted */}
         <div
           style={{
             flex: 1,
@@ -415,16 +215,14 @@ export function ChatPage({
           <MainThread
             threadId={mainThreadId}
             conversationId={conversationId}
-            mergeEvents={mergeEvents}
             activeChildMessageId={mainActiveChildMessageId}
             activeHighlightedText={mainActiveChildHighlightedText}
             onOpenTangent={handleOpenTangent}
             initialMessages={initialMessages}
-            refreshTrigger={refreshTrigger}
           />
         </div>
 
-        {/* Tangent panels — only mount the 2 visible panels (left + right) */}
+        {/* Only mount the two visible tangent panels (left + right). */}
         {openTangents
           .filter((tangent) => {
             const isLeft = tangent.threadId === viewParentId;
@@ -433,7 +231,6 @@ export function ChatPage({
           })
           .map((tangent) => {
             const isLeft = tangent.threadId === viewParentId;
-
             return (
               <div
                 key={tangent.threadId}
@@ -452,21 +249,16 @@ export function ChatPage({
                   activeHighlightedText={isLeft ? leftActiveChildHighlightedText : undefined}
                   siblings={!isLeft ? rightSiblings : undefined}
                   onSelectSibling={
-                    !isLeft
-                      ? (id) => setActiveChild(viewParentId, id)
-                      : undefined
+                    !isLeft ? (id) => setActiveChild(viewParentId, id) : undefined
                   }
-                  refreshTrigger={threadRefreshTriggers[tangent.threadId]}
-                  mergeEvents={threadMergeEvents[tangent.threadId]}
                   onOpenTangent={handleOpenTangent}
-                  onMerge={handleMerge}
-                  onBranch={handleBranch}
-                  onClose={handleClose}
+                  onMerge={actions.mergeTangent}
+                  onBranch={actions.branchTangent}
+                  onClose={actions.closeTangent}
                 />
               </div>
             );
           })}
-
       </div>
     </div>
   );

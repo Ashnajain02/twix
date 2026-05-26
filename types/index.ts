@@ -1,36 +1,15 @@
-export type ThreadStatus = "ACTIVE" | "MERGED" | "ARCHIVED";
-export type MessageRole = "USER" | "ASSISTANT" | "SYSTEM";
+/**
+ * Shared types.
+ *
+ * Database model types are re-exported from Prisma's generated client —
+ * never hand-rolled here, since they drift the moment the schema changes.
+ */
 
-export interface Thread {
-  id: string;
-  conversationId: string;
-  parentThreadId: string | null;
-  parentMessageId: string | null;
-  highlightedText: string | null;
-  status: ThreadStatus;
-  depth: number;
-  createdAt: Date;
-  mergedAt: Date | null;
-}
+export type { MergeEvent, MessageRole, ThreadStatus } from "@/lib/generated/prisma/client";
 
-export interface Message {
-  id: string;
-  threadId: string;
-  role: MessageRole;
-  content: string;
-  createdAt: Date;
-  metadata: Record<string, unknown> | null;
-}
-
-export interface MergeEvent {
-  id: string;
-  sourceThreadId: string;
-  targetThreadId: string;
-  afterMessageId: string;
-  summary: string | null;
-  createdAt: Date;
-}
-
+/**
+ * Client-side UI state for an open tangent window. Not a DB row.
+ */
 export interface TangentWindowState {
   threadId: string;
   parentThreadId: string;

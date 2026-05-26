@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { badRequest, notFound, unauthorized, zodError } from "@/lib/http";
 import { createTangentSchema } from "@/lib/validators";
 
 // POST: Create a new tangent thread
@@ -9,43 +10,33 @@ export async function POST(
   { params }: { params: Promise<{ conversationId: string }> }
 ) {
   const session = await auth();
-  if (!session?.user?.id) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  if (!session?.user?.id) return unauthorized();
 
   const { conversationId } = await params;
 
-  // Verify conversation ownership
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
+    select: { userId: true },
   });
 
   if (!conversation || conversation.userId !== session.user.id) {
-    return new Response("Not found", { status: 404 });
+    return notFound();
   }
 
-  const body = await req.json();
+  const body = await req.json().catch(() => ({}));
   const parsed = createTangentSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Invalid input", details: parsed.error.issues },
-      { status: 400 }
-    );
-  }
+  if (!parsed.success) return zodError(parsed.error);
 
   const { parentThreadId, highlightedText } = parsed.data;
 
   // Validate parent thread belongs to this conversation
   const parentThread = await prisma.thread.findUnique({
     where: { id: parentThreadId },
+    select: { conversationId: true, depth: true },
   });
 
   if (!parentThread || parentThread.conversationId !== conversationId) {
-    return NextResponse.json(
-      { error: "Parent thread not found in this conversation" },
-      { status: 400 }
-    );
+    return badRequest("Parent thread not found in this conversation");
   }
 
   // Resolve the latest message in the parent thread server-side.
@@ -54,9 +45,9 @@ export async function POST(
   const latestMessage = await prisma.message.findFirst({
     where: { threadId: parentThreadId },
     orderBy: { createdAt: "desc" },
+    select: { id: true },
   });
 
-  // Create the tangent thread
   const tangentThread = await prisma.thread.create({
     data: {
       conversationId,

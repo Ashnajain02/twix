@@ -1,7 +1,16 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { badRequest, notFound, tooManyRequests, unauthorized } from "@/lib/http";
 import { generateMergeSummary } from "@/lib/merge";
+import { collectActiveDescendants } from "@/lib/thread-tree";
+import { createLogger } from "@/lib/logger";
+import { createRateLimit } from "@/lib/rate-limit";
+
+const log = createLogger("merge");
+
+// 15 merges / minute per user — merges trigger an LLM summary call.
+const limiter = createRateLimit({ max: 15, windowMs: 60_000 });
 
 // POST: Merge this tangent thread into its parent
 export async function POST(
@@ -9,91 +18,47 @@ export async function POST(
   { params }: { params: Promise<{ threadId: string }> }
 ) {
   const session = await auth();
-  if (!session?.user?.id) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-  
+  if (!session?.user?.id) return unauthorized();
+
+  const rl = limiter.check(`u:${session.user.id}`);
+  if (!rl.allowed) return tooManyRequests(rl.retryAfter);
 
   const { threadId } = await params;
 
-  // Fetch thread + latest parent message in parallel
-  const [thread, latestParentMessage] = await Promise.all([
-    prisma.thread.findUnique({
-      where: { id: threadId },
-      include: { conversation: { select: { userId: true, id: true } } },
-    }),
-    // We need the threadId's parentThreadId for this query, but we can't
-    // use it before the first query completes. Instead, do a sub-select:
-    prisma.thread.findUnique({
-      where: { id: threadId },
-      select: { parentThreadId: true },
-    }).then((t) =>
-      t?.parentThreadId
-        ? prisma.message.findFirst({
-            where: { threadId: t.parentThreadId },
-            orderBy: { createdAt: "desc" },
-            select: { id: true },
-          })
-        : null
-    ),
-  ]);
-
-  if (!thread || thread.conversation.userId !== session.user.id) {
-    return new Response("Not found", { status: 404 });
-  }
-
-  if (!thread.parentThreadId) {
-    return NextResponse.json(
-      { error: "Cannot merge the main thread" },
-      { status: 400 }
-    );
-  }
-
-  if (thread.status !== "ACTIVE") {
-    return NextResponse.json(
-      { error: "Thread is already merged or archived" },
-      { status: 400 }
-    );
-  }
-
-  if (!latestParentMessage) {
-    return NextResponse.json(
-      { error: "Parent thread has no messages" },
-      { status: 400 }
-    );
-  }
-
-  // Batch-fetch ALL active descendants in ONE query instead of N+1 BFS
-  const allActiveThreads = await prisma.thread.findMany({
-    where: {
-      conversationId: thread.conversation.id,
-      status: "ACTIVE",
+  const thread = await prisma.thread.findUnique({
+    where: { id: threadId },
+    select: {
+      conversationId: true,
+      parentThreadId: true,
+      status: true,
+      conversation: { select: { userId: true } },
     },
-    select: { id: true, parentThreadId: true },
   });
 
-  // Build parent→children map and walk it in-memory
-  const childrenMap = new Map<string, string[]>();
-  for (const t of allActiveThreads) {
-    if (t.parentThreadId) {
-      const existing = childrenMap.get(t.parentThreadId) || [];
-      existing.push(t.id);
-      childrenMap.set(t.parentThreadId, existing);
-    }
+  if (!thread || thread.conversation.userId !== session.user.id) {
+    return notFound();
+  }
+  if (!thread.parentThreadId) {
+    return badRequest("Cannot merge the main thread");
+  }
+  if (thread.status !== "ACTIVE") {
+    return badRequest("Thread is already merged or archived");
   }
 
-  const toArchive: string[] = [];
-  const queue = [threadId];
-  while (queue.length > 0) {
-    const currentId = queue.shift()!;
-    const children = childrenMap.get(currentId) || [];
-    for (const childId of children) {
-      toArchive.push(childId);
-      queue.push(childId);
-    }
+  // Fetch latest parent message + active descendants in parallel.
+  const [latestParentMessage, descendants] = await Promise.all([
+    prisma.message.findFirst({
+      where: { threadId: thread.parentThreadId },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    }),
+    collectActiveDescendants(thread.conversationId, threadId),
+  ]);
+
+  if (!latestParentMessage) {
+    return badRequest("Parent thread has no messages");
   }
 
-  // Single transaction: create merge event (no summary yet) + update statuses
   const mergeEvent = await prisma.$transaction(async (tx) => {
     const event = await tx.mergeEvent.create({
       data: {
@@ -109,9 +74,9 @@ export async function POST(
       data: { status: "MERGED", mergedAt: new Date() },
     });
 
-    if (toArchive.length > 0) {
+    if (descendants.length > 0) {
       await tx.thread.updateMany({
-        where: { id: { in: toArchive } },
+        where: { id: { in: descendants } },
         data: { status: "ARCHIVED" },
       });
     }
@@ -127,7 +92,7 @@ export async function POST(
         data: { summary },
       })
     )
-    .catch(() => {}); // non-critical
+    .catch((err) => log.error("merge summary backfill failed", err));
 
   return NextResponse.json(mergeEvent);
 }

@@ -1,10 +1,12 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../lib/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../lib/generated/prisma"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
+  provider   = "postgresql"
+  extensions = [vector]
 }
 
 // ---- NextAuth required tables ----
@@ -65,37 +67,38 @@ model User {
 model Conversation {
   id        String   @id @default(cuid())
   userId    String   @map("user_id")
-  title     String   @default("New Conversation")
+  title     String   @default("New Conversation") @db.VarChar(200)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   threads Thread[]
 
+  @@index([userId, updatedAt(sort: Desc)])
   @@map("conversations")
 }
 
 model Thread {
-  id              String       @id @default(cuid())
-  conversationId  String       @map("conversation_id")
-  parentThreadId  String?      @map("parent_thread_id")
-  parentMessageId String?      @map("parent_message_id")
-  highlightedText String?      @map("highlighted_text") @db.Text
+  id                  String       @id @default(cuid())
+  conversationId      String       @map("conversation_id")
+  parentThreadId      String?      @map("parent_thread_id")
+  parentMessageId     String?      @map("parent_message_id")
+  highlightedText     String?      @map("highlighted_text") @db.Text
   status              ThreadStatus @default(ACTIVE)
   depth               Int          @default(0)
   createdAt           DateTime     @default(now()) @map("created_at")
   mergedAt            DateTime?    @map("merged_at")
-  summary             String?      @db.Text @map("summary")
+  summary             String?      @db.Text
   summaryMessageCount Int          @default(0) @map("summary_message_count")
-  knowledge           Json?        @db.JsonB @map("knowledge")
+  knowledge           Json?        @db.JsonB
 
-  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  parentThread   Thread?       @relation("ThreadTree", fields: [parentThreadId], references: [id])
-  childThreads   Thread[]      @relation("ThreadTree")
-  parentMessage  Message?      @relation("TangentOrigin", fields: [parentMessageId], references: [id])
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  parentThread   Thread?      @relation("ThreadTree", fields: [parentThreadId], references: [id], onDelete: SetNull)
+  childThreads   Thread[]     @relation("ThreadTree")
+  parentMessage  Message?     @relation("TangentOrigin", fields: [parentMessageId], references: [id], onDelete: SetNull)
   messages       Message[]
-  mergesAsSource MergeEvent[]  @relation("MergeSource")
-  mergesAsTarget MergeEvent[]  @relation("MergeTarget")
+  mergesAsSource MergeEvent[] @relation("MergeSource")
+  mergesAsTarget MergeEvent[] @relation("MergeTarget")
 
   @@index([conversationId])
   @@index([parentThreadId])
@@ -104,12 +107,13 @@ model Thread {
 }
 
 model Message {
-  id        String      @id @default(cuid())
-  threadId  String      @map("thread_id")
+  id        String                       @id @default(cuid())
+  threadId  String                       @map("thread_id")
   role      MessageRole
-  content   String      @db.Text
-  createdAt DateTime    @default(now()) @map("created_at")
-  metadata  Json?       @db.JsonB
+  content   String                       @db.Text
+  createdAt DateTime                     @default(now()) @map("created_at")
+  metadata  Json?                        @db.JsonB
+  embedding Unsupported("vector(1536)")?
 
   thread         Thread       @relation(fields: [threadId], references: [id], onDelete: Cascade)
   tangentThreads Thread[]     @relation("TangentOrigin")
@@ -133,6 +137,7 @@ model MergeEvent {
 
   @@index([targetThreadId])
   @@index([sourceThreadId])
+  @@index([afterMessageId])
   @@map("merge_events")
 }
 
